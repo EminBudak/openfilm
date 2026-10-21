@@ -1,5 +1,63 @@
 # openfilm
 
+## 0.2.5
+
+### Patch Changes
+
+- [#163](https://github.com/openfilm/openfilm/pull/163) [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02) Thanks [@PazChen](https://github.com/PazChen)! - Export › Burn in subtitles: bilingual subtitles show the original and its translation once each, as in the editor. The translation was drawn twice.
+
+- [#160](https://github.com/openfilm/openfilm/pull/160) [`ef8c6c3`](https://github.com/openfilm/openfilm/commit/ef8c6c31be3c65421e53bc3d9bcc27d6655079f6) Thanks [@taavie-z](https://github.com/taavie-z)! - Keep selection action bars behind Export and other dialogs, so clip actions cannot be pressed through the export window.
+
+- [#151](https://github.com/openfilm/openfilm/pull/151) [`4df3346`](https://github.com/openfilm/openfilm/commit/4df3346442c7c4c80ebcf4e53a9a21ba79bbfb48) Thanks [@WEBGRS](https://github.com/WEBGRS)! - Projects: double-clicking a folder opens the folder only. Before, its second click opened whichever project had just appeared under the pointer.
+
+- [#163](https://github.com/openfilm/openfilm/pull/163) [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02) Thanks [@PazChen](https://github.com/PazChen)! - Editing-project drafts are faster and need almost no spare disk space. Each page's transparency is read in every frame as the page is drawn. An opaque page is written straight to H.264 (or ProRes 422 HQ), with no lossless copy first and no second pass. A page with any transparent pixel is drawn again at once in the same browser tab, as lossless PNG (or ProRes 4444), exactly as before. A draft of a music video whose pages were held as gigabytes of PNG while it was made now needs no more room than the draft itself.
+
+- [#163](https://github.com/openfilm/openfilm/pull/163) [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02) Thanks [@PazChen](https://github.com/PazChen)! - Export › Editing project › 剪映 or CapCut: a draft goes to the drafts folder the app's own Settings › Drafts location names, so it is on the app's home screen even when that folder was moved (it went to the default folder, where the app no longer looks).
+
+- [#163](https://github.com/openfilm/openfilm/pull/163) [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02) Thanks [@PazChen](https://github.com/PazChen)! - Export › Editing project starts its browsers once for all the pages and keeps them steady.
+
+  - One process draws every page with the same browsers. Each page opens its own tab and closes it after.
+  - A browser that crashes or stops answering is replaced at once, and its page is drawn again in new browsers. A page's own error still stops the export and says why.
+  - A browser is started again after many pages, so memory stays flat.
+  - Cancel still stops everything and leaves nothing behind.
+  - A transparent page now comes out the same to the last pixel however many browsers share it. Before, the first two frames each browser drew came out a level or two off.
+
+- [#163](https://github.com/openfilm/openfilm/pull/163) [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02) Thanks [@PazChen](https://github.com/PazChen)! - Export › Editing project is two to four times faster, with the same files. A 剪映 or CapCut draft's pages are drawn as a quick lossless PNG and written once at the end (H.264, ProRes, or PNG as before): ffmpeg's own PNG settings took more processor time than drawing the page. Pages of every editing project are drawn several at once with the browsers the export already uses, each page's check and re-encode running while the next ones draw. On an M5 Mac a 50-second film of ten full-frame pages went from 153–190 s to about 50 s, and a 95-second music video from 334 s to 145 s.
+
+- [#163](https://github.com/openfilm/openfilm/pull/163) [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02) Thanks [@PazChen](https://github.com/PazChen)! - Export › Editing project: a choice of how the pages are written. A 剪映 or CapCut draft is automatic by default: each page is drawn with its transparency, as Studio shows it, and every frame is read; a page with no clear pixel in any frame comes as H.264 (the graphics chip's when there is one), and one with any transparency as lossless PNG, each picture kept once for as long as it shows. A one-minute film of full-frame pages went from 2.5 GB to under 20 MB. All PNG, or ProRes (422 HQ for an opaque page, 4444 for one with transparency), can be picked instead. Premiere Pro and DaVinci Resolve keep ProRes 4444 by default, with PNG to pick; Final Cut Pro takes ProRes 4444.
+
+- [#163](https://github.com/openfilm/openfilm/pull/163) [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02) Thanks [@PazChen](https://github.com/PazChen)! - Exports keep the page's colors in every codec: ProRes, VP9, HEVC and the editing-project pages are converted with BT.709 and tagged so (red came out up to 25 levels off, green up to 39, in Apple's apps), with the graphics chip or without it. HEVC with alpha opens in Apple's apps again: it was copied after encoding, which dropped its alpha layer.
+
+- [#163](https://github.com/openfilm/openfilm/pull/163) [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02) Thanks [@PazChen](https://github.com/PazChen)! - Exports need far less free disk space while they run. A page's frames were on the disk three times while its file was made; now they are there twice at most, and a page drawn by one browser is moved into place instead of copied. This matters most for editing projects, whose pages are drawn as lossless PNG first, so a long page is gigabytes. An export that fills the disk now says so plainly, in your language, instead of showing ffmpeg's log.
+
+- [#163](https://github.com/openfilm/openfilm/pull/163) [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02) Thanks [@PazChen](https://github.com/PazChen)! - An editing project's browser pool and its footage copies stop their whole process tree on Windows when they are ended, and a copy that a virus scanner holds for a moment as it is written is tried again instead of counting as not made.
+
+- [#163](https://github.com/openfilm/openfilm/pull/163) [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02) Thanks [@PazChen](https://github.com/PazChen)! - Quitting Studio while an export runs no longer leaves half-made files behind. Studio now waits a few seconds for the export to stop and clean up after itself. If Studio was ended outright (forced to quit, a crash, the computer shutting down), the next export cleans up what was left: hidden half-made files beside your exports and drafts, and scratch in the project's cache, which could be gigabytes.
+
+- [#163](https://github.com/openfilm/openfilm/pull/163) [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02) Thanks [@PazChen](https://github.com/PazChen)! - The export tray stays until it is closed: a finished export's card no longer goes by itself after a few seconds, and it is still there when the project or the page is opened again while Studio runs, so its file is always one click away. A closed card stays closed.
+
+- [#163](https://github.com/openfilm/openfilm/pull/163) [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02) Thanks [@PazChen](https://github.com/PazChen)! - Exports are safer on Windows and when something goes wrong: a file is written under a hidden name until it is whole and then renamed, so a stop or a crash never leaves a broken file that looks made; a rename that a virus scanner or the editor watching the folder holds for a moment is tried again; cleaning up after an export that is made never fails it (it used to delete the finished files); a cancel ends the export's whole process tree; a long page's PNG keeps its pictures however many there are; the graphics chip running out of memory or sessions falls back to the processor's encoder; names ending in a dot or a space, or named like a Windows device, are written so Windows can open them; and a draft's files are named with the system's own separators.
+
+- [#163](https://github.com/openfilm/openfilm/pull/163) [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02) Thanks [@PazChen](https://github.com/PazChen)! - Footage the browser cannot play (ProRes, and other codecs it has no decoder for) placed whole, without a trim, plays and exports: its length and picture size come from ffprobe when the browser cannot read them. The film stopped with "no length to trim against" in Studio's preview, in every export and in `openfilm render`.
+
+- [#163](https://github.com/openfilm/openfilm/pull/163) [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02) Thanks [@PazChen](https://github.com/PazChen)! - Export: a mono sound, such as a voice recording, is as loud in the export as in the editor. It was 3 dB quieter.
+
+- [#150](https://github.com/openfilm/openfilm/pull/150) [`419da5d`](https://github.com/openfilm/openfilm/commit/419da5dc483267b07e4f32d73c993fe5f8ee04d1) Thanks [@WEBGRS](https://github.com/WEBGRS)! - Projects: a folder has its own "New project", and the project it makes is in that folder. Before, a project could only be made at the top level and then moved into a folder.
+
+- [#163](https://github.com/openfilm/openfilm/pull/163) [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02) Thanks [@PazChen](https://github.com/PazChen)! - The paused preview shows the exact frame of a video, as an export draws it. The browser sometimes decodes a frame and never puts it on screen, so the picture could stay a few frames behind after you stepped or stopped. Studio now checks the frame on screen and seeks again if it is not there yet. Scrubbing stays as fast as before.
+
+- [#163](https://github.com/openfilm/openfilm/pull/163) [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02) Thanks [@PazChen](https://github.com/PazChen)! - Viewer › Playback settings no longer has a subtitles switch. Subtitles are shown or hidden only with the CC button, in full screen too.
+
+- [#159](https://github.com/openfilm/openfilm/pull/159) [`d864efc`](https://github.com/openfilm/openfilm/commit/d864efcb23352d80f8c74a0645602555933e70bd) Thanks [@taavie-z](https://github.com/taavie-z)! - Keep subtitles and their translations attached when renaming or moving audio and video files in Studio.
+
+- [#163](https://github.com/openfilm/openfilm/pull/163) [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02) Thanks [@PazChen](https://github.com/PazChen)! - Exports drawing several pages at once make the playable copy of shared footage once. ProRes, HEVC a browser can't play, and slow-seeking footage get that copy. Two pages of one source now wait for the same copy, instead of both writing one file, which could leave a page drawn from a half-written copy or, on Windows, from footage the browser can't play.
+
+- [#163](https://github.com/openfilm/openfilm/pull/163) [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02) Thanks [@PazChen](https://github.com/PazChen)! - The inspector's text color now changes words whose page gives them a fill of their own (`-webkit-text-fill-color`, often used for gold or gradient words). It shows the color the words are drawn in, and a color you pick takes over that fill, so the words are drawn in it.
+
+- [#163](https://github.com/openfilm/openfilm/pull/163) [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02) Thanks [@PazChen](https://github.com/PazChen)! - Inspector › Volume is in dB, from silent to +14 dB (500%): 0 dB is the file as it is, and each step sounds as big as the next, quiet or loud.
+
+- [#163](https://github.com/openfilm/openfilm/pull/163) [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02) Thanks [@PazChen](https://github.com/PazChen)! - Inspector › Volume goes up to 500%, and Normalize loudness can raise a clip that far, so a quiet voice recording can be as loud as the rest of the film. It stopped at 200%.
+
 ## 0.2.4
 
 ### Patch Changes

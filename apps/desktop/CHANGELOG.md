@@ -1,5 +1,16 @@
 # @openfilm/desktop
 
+## 0.2.5
+
+### Patch Changes
+
+- [#163](https://github.com/openfilm/openfilm/pull/163) [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02) Thanks [@PazChen](https://github.com/PazChen)! - Desktop: DeepSeek Harness is one of the agents the chat can connect, its `dsh` program over ACP like the others, found inside its desktop app too. The chat's menu lists models an agent offers in groups, each with its group's name.
+
+- [#163](https://github.com/openfilm/openfilm/pull/163) [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02) Thanks [@PazChen](https://github.com/PazChen)! - The app's own ffmpeg is FFmpeg 8.1.2 on a Mac and 9.0.2 on Windows (was 6.0 and 6.1.1). FFmpeg 6 wrote ProRes 4444 whose transparency editors read as opaque, so rendered pages came into 剪映 and other editors on black.
+
+- Updated dependencies [[`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02), [`ef8c6c3`](https://github.com/openfilm/openfilm/commit/ef8c6c31be3c65421e53bc3d9bcc27d6655079f6), [`4df3346`](https://github.com/openfilm/openfilm/commit/4df3346442c7c4c80ebcf4e53a9a21ba79bbfb48), [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02), [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02), [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02), [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02), [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02), [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02), [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02), [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02), [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02), [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02), [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02), [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02), [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02), [`419da5d`](https://github.com/openfilm/openfilm/commit/419da5dc483267b07e4f32d73c993fe5f8ee04d1), [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02), [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02), [`d864efc`](https://github.com/openfilm/openfilm/commit/d864efcb23352d80f8c74a0645602555933e70bd), [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02), [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02), [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02), [`0cc33fe`](https://github.com/openfilm/openfilm/commit/0cc33fe34f0ef98ec5a511d700ff4c8b73e1ce02)]:
+  - openfilm@0.2.5
+
 ## 0.2.4
 
 ### Patch Changes

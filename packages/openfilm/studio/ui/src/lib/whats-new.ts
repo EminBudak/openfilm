@@ -17,6 +17,52 @@ export interface ReleaseNotes { version: string; date: string; notes: Record<Lan
 
 export const RELEASES: readonly ReleaseNotes[] = [
   {
+    version: '0.2.5',
+    date: '2026-10-21',
+    notes: {
+      en: [
+        { kind: 'improved', text: 'Export › Editing project is two to four times faster and needs far less free disk space. You can choose how its pages are written; 剪映 and CapCut drafts show on the app’s home screen.' },
+        { kind: 'improved', text: 'Exports keep the page’s colors in every format, and transparent HEVC and ProRes open as they should in Apple’s apps and in editors.' },
+        { kind: 'improved', text: 'Exports are safer, on Windows above all: no broken file after a stop or a crash, nothing half-made left behind, and a full disk said plainly.' },
+        { kind: 'new', text: 'DeepSeek Harness joins the agents the chat can use. Volume is in dB, up to +14 dB.' },
+        { kind: 'improved', text: 'New project inside a folder makes it there, and renaming or moving a file keeps its subtitles.' },
+        { kind: 'fixed', text: 'A mono voice exports as loud as it plays; bilingual burned-in subtitles show the translation once; ProRes footage plays and exports; the paused preview shows the exact frame.' },
+      ],
+      'zh-CN': [
+        { kind: 'improved', text: '导出 › 剪辑工程快了 2 到 4 倍，需要的空闲磁盘空间也少得多。可以选择页面的写入方式；剪映和 CapCut 草稿会出现在它们的首页。' },
+        { kind: 'improved', text: '各种格式的导出都保持页面原本的颜色；带透明的 HEVC 和 ProRes 在 Apple 的应用和剪辑软件里都能正确打开。' },
+        { kind: 'improved', text: '导出更稳了，尤其在 Windows 上：停止或崩溃后不会留下损坏的文件，也不会残留半成品；磁盘满了会直接说明。' },
+        { kind: 'new', text: '对话可以连接 DeepSeek Harness。音量改用 dB 显示，最高 +14 dB。' },
+        { kind: 'improved', text: '在文件夹里新建项目会直接建在这个文件夹里；改名或移动文件时，字幕会跟着走。' },
+        { kind: 'fixed', text: '单声道人声导出后和播放时一样响；双语字幕烧录时译文只显示一次；ProRes 素材能播放和导出；暂停时显示的就是精确的那一帧。' },
+      ],
+      ja: [
+        { kind: 'improved', text: '書き出し › 編集プロジェクトが 2〜4 倍速くなり、必要な空き容量も大きく減りました。ページの書き出し方を選べ、剪映と CapCut の下書きはアプリのホームに表示されます。' },
+        { kind: 'improved', text: 'どの形式でもページの色のまま書き出され、透過の HEVC と ProRes が Apple のアプリや編集ソフトで正しく開きます。' },
+        { kind: 'improved', text: '書き出しがより安全になりました（特に Windows）。停止やクラッシュの後に壊れたファイルや作りかけのファイルが残らず、ディスクがいっぱいならそう伝えます。' },
+        { kind: 'new', text: 'チャットで DeepSeek Harness を使えます。音量は dB 表示になり、最大 +14 dB です。' },
+        { kind: 'improved', text: 'フォルダ内の新規プロジェクトはそのフォルダに作られ、ファイルの名前変更や移動で字幕も一緒に移ります。' },
+        { kind: 'fixed', text: 'モノラルの声が再生時と同じ大きさで書き出され、二か国語の焼き込み字幕で訳が一度だけ表示され、ProRes の素材が再生・書き出しでき、一時停止中のプレビューが正確なフレームを表示します。' },
+      ],
+      ko: [
+        { kind: 'improved', text: '내보내기 › 편집 프로젝트가 2~4배 빨라지고 필요한 여유 디스크 공간도 크게 줄었습니다. 페이지를 쓰는 방식을 고를 수 있고, 剪映와 CapCut 초안은 앱 홈 화면에 나타납니다.' },
+        { kind: 'improved', text: '모든 형식에서 페이지 색 그대로 내보내고, 투명한 HEVC와 ProRes가 Apple 앱과 편집 프로그램에서 제대로 열립니다.' },
+        { kind: 'improved', text: '내보내기가 더 안전해졌습니다(특히 Windows). 중지나 충돌 뒤에 깨진 파일이나 만들다 만 파일이 남지 않고, 디스크가 가득 차면 그렇게 알려 줍니다.' },
+        { kind: 'new', text: '채팅에서 DeepSeek Harness를 쓸 수 있습니다. 음량은 dB로 표시되며 최대 +14 dB입니다.' },
+        { kind: 'improved', text: '폴더 안에서 새 프로젝트를 만들면 그 폴더에 만들어지고, 파일 이름을 바꾸거나 옮겨도 자막이 함께 갑니다.' },
+        { kind: 'fixed', text: '모노 음성이 재생할 때만큼 크게 내보내지고, 이중 언어 번인 자막의 번역이 한 번만 나오며, ProRes 소스가 재생·내보내기되고, 일시 정지한 미리 보기가 정확한 프레임을 보여 줍니다.' },
+      ],
+      es: [
+        { kind: 'improved', text: 'Exportar › Proyecto de edición es de dos a cuatro veces más rápido y necesita mucho menos espacio libre. Puedes elegir cómo se escriben sus páginas; los borradores de 剪映 y CapCut aparecen en la pantalla de inicio de la app.' },
+        { kind: 'improved', text: 'Las exportaciones mantienen los colores de la página en todos los formatos, y el HEVC y ProRes con transparencia se abren bien en las apps de Apple y en los editores.' },
+        { kind: 'improved', text: 'Las exportaciones son más seguras, sobre todo en Windows: ningún archivo roto tras detenerla o un fallo, nada a medio hacer, y un disco lleno se dice con claridad.' },
+        { kind: 'new', text: 'DeepSeek Harness se suma a los agentes del chat. El volumen va en dB, hasta +14 dB.' },
+        { kind: 'improved', text: 'Nuevo proyecto dentro de una carpeta lo crea ahí, y al renombrar o mover un archivo sus subtítulos van con él.' },
+        { kind: 'fixed', text: 'Una voz mono se exporta tan alta como suena; los subtítulos bilingües grabados muestran la traducción una vez; el material ProRes se reproduce y exporta; la vista previa en pausa muestra el fotograma exacto.' },
+      ],
+    },
+  },
+  {
     version: '0.2.4',
     date: '2026-10-20',
     notes: {
