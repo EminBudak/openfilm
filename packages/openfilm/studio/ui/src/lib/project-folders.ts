@@ -46,6 +46,28 @@ export const folderApi = {
 };
 
 /**
+ * What the list starts with: "New project" wherever projects are listed, the top level or a folder (not over a
+ * search's results); the examples at the top level only.
+ */
+export function listStarts({ folderId, query }: { folderId: string | null; query: string }): { newProject: boolean; examples: boolean } {
+  const listing = !query.trim();
+  return { newProject: listing, examples: listing && folderId === null };
+}
+
+/**
+ * A new project inside `folderId` (null: the top level): made, then filed there before it opens. One that cannot be
+ * filed (its folder went meanwhile) is still made, at the top level.
+ */
+export async function newProjectIn<P extends { id: string }>(
+  folderId: string | null,
+  { create, move }: { create: () => Promise<P>; move: (projectId: string, folderId: string | null) => Promise<unknown> },
+): Promise<P> {
+  const project = await create();
+  if (folderId) await move(project.id, folderId).catch(() => {});
+  return project;
+}
+
+/**
  * The projects to show, sorted. Like a file system: the top level shows the projects in no folder, a folder its own.
  * A search looks everywhere (a person searching wants "where is that film", not to guess its folder first).
  */

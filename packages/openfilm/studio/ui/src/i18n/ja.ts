@@ -196,7 +196,6 @@ export const ja: Words = {
     setAsCover: 'プロジェクトのカバーにする',
     coverSet: 'カバーを設定しました',
     coverFailed: 'カバーにできませんでした。',
-    folderEmpty: 'このフォルダーは空です',
     creating: 'プロジェクトを作成中',
     opening: 'プロジェクトを開いています',
     missing: 'フォルダーが見つかりません',

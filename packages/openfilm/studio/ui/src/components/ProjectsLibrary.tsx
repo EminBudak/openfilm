@@ -20,7 +20,7 @@ import { createPortal } from 'react-dom';
 import { Loader2 } from 'lucide-react';
 import { api, ApiError, LIBRARY_EVENT } from '@/api';
 import { useT } from '@/i18n';
-import { folderApi, folderCounts, folderTrail, type ProjectFolder } from '@/lib/project-folders';
+import { folderApi, folderCounts, folderTrail, newProjectIn, type ProjectFolder } from '@/lib/project-folders';
 import { stillThere } from '@/lib/project-delete';
 import { studioHost } from '@/lib/host';
 import { SourceError, sourcesApi } from '@/lib/project-sources';
@@ -307,11 +307,11 @@ export function ProjectsPopover({
     if (wasOpen.current) latestClose.current();
   }, [currentProjectId]);
 
-  /** A new project, named as Studio names it (Untitled, Untitled 2…), opened at once: it is renamed later. */
-  async function newProject() {
+  /** A new project in `folderId` (null: the top level), named as Studio names it (Untitled, Untitled 2…), opened at once: it is renamed later. */
+  async function newProject(folderId: string | null) {
     setBusy('creating');
     try {
-      const project = await api.newProject(t('project.untitled'));
+      const project = await newProjectIn(folderId, { create: () => api.newProject(t('project.untitled')), move: folderApi.move });
       go(project.id, 'creating');
     } catch {
       setBusy(null);
@@ -436,7 +436,7 @@ export function ProjectsPopover({
               heading={<LauncherSwitch view={view} onView={showView} />}
               projects={lib.projects}
               creating={busy !== null}
-              onNewProject={() => void newProject()}
+              onNewProject={(folderId) => void newProject(folderId)}
               onOpenFolder={() => void openFolder()}
               onGetFromGitHub={() => setGithub({})}
               onLocate={(project) => void locate(project)}

@@ -197,7 +197,6 @@ export const zhCN: Words = {
     setAsCover: '设为项目封面',
     coverSet: '已设为封面',
     coverFailed: '无法用它做封面。',
-    folderEmpty: '此文件夹为空',
     creating: '正在创建项目',
     opening: '正在打开项目',
     missing: '找不到文件夹',

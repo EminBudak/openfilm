@@ -196,7 +196,6 @@ export const ko: Words = {
     setAsCover: '프로젝트 커버로 설정',
     coverSet: '커버를 설정했습니다',
     coverFailed: '커버로 사용할 수 없습니다.',
-    folderEmpty: '이 폴더는 비어 있습니다',
     creating: '프로젝트 만드는 중',
     opening: '프로젝트 여는 중',
     missing: '폴더를 찾을 수 없음',

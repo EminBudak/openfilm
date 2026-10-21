@@ -196,7 +196,6 @@ export const es: Words = {
     setAsCover: 'Usar como portada del proyecto',
     coverSet: 'Portada establecida',
     coverFailed: 'No se pudo usar como portada.',
-    folderEmpty: 'Esta carpeta está vacía',
     creating: 'Creando proyecto',
     opening: 'Abriendo proyecto',
     missing: 'Carpeta no encontrada',

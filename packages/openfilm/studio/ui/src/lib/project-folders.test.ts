@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { folderCounts, folderPosters, folderTrail, parentOf, visibleProjects, type ListedProject } from './project-folders.ts';
+import { folderCounts, folderPosters, folderTrail, listStarts, newProjectIn, parentOf, visibleProjects, type ListedProject } from './project-folders.ts';
 
 const folders = [{ id: 'f', name: 'Ads', createdAt: 1 }];
 const projects: ListedProject[] = [
@@ -55,4 +55,30 @@ test('folders in folders: the trail to one, and a folder counts what its folders
   ];
   assert.deepEqual(folderCounts(inside, tree), { acme: 1, clients: 2 });
   assert.deepEqual(folderPosters(inside, tree).clients?.map((c) => c.id), ['b', 'a']);
+});
+
+test('"New project" starts the list at the top level and inside a folder; the examples at the top level only', () => {
+  assert.deepEqual(listStarts({ folderId: null, query: '' }), { newProject: true, examples: true });
+  assert.deepEqual(listStarts({ folderId: 'f', query: '' }), { newProject: true, examples: false });
+  /* a search shows its results only */
+  assert.deepEqual(listStarts({ folderId: null, query: 'ad ' }), { newProject: false, examples: false });
+  assert.deepEqual(listStarts({ folderId: 'f', query: ' ' }), { newProject: true, examples: false });
+});
+
+test('a project made inside a folder is filed in it before it opens; at the top level it is not filed', async () => {
+  const calls: string[] = [];
+  const create = async () => { calls.push('create'); return { id: 'n' }; };
+  const move = async (id: string, folderId: string | null) => { calls.push(`move ${id} ${folderId}`); return {}; };
+  assert.deepEqual(await newProjectIn('f', { create, move }), { id: 'n' });
+  assert.deepEqual(calls, ['create', 'move n f']);
+  calls.length = 0;
+  await newProjectIn(null, { create, move });
+  assert.deepEqual(calls, ['create']);
+});
+
+test('a project that cannot be filed is still made (it stays at the top level); one that cannot be made throws', async () => {
+  const create = async () => ({ id: 'n' });
+  const move = async () => { throw new Error('no such folder'); };
+  assert.deepEqual(await newProjectIn('gone', { create, move }), { id: 'n' });
+  await assert.rejects(newProjectIn('f', { create: async () => { throw new Error('disk full'); }, move }), /disk full/);
 });

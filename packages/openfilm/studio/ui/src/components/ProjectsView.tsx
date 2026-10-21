@@ -14,7 +14,7 @@ import { ExamplesSection } from './ProjectSources';
 import { useLanguage, useT, type Language } from '@/i18n';
 import { limitTitleWidth, TITLE_MAX_WIDTH } from '@/lib/title';
 import { api, type Project } from '@/api';
-import { folderCounts, folderPosters, folderTrail, parentOf, visibleProjects, type LibrarySort, type ProjectFolder } from '@/lib/project-folders';
+import { folderCounts, folderPosters, folderTrail, listStarts, parentOf, visibleProjects, type LibrarySort, type ProjectFolder } from '@/lib/project-folders';
 import { opensOnClick, posterRetryDelay, posterTry } from '@/lib/projects-page';
 import { ContextMenu } from './ContextMenu';
 import { ProjectMenu } from './ProjectMenu';
@@ -55,8 +55,8 @@ export function ProjectsView({
   projects: LibraryProject[];
   /** A project is being created or opened; "New project" does not take a second click meanwhile. */
   creating?: boolean;
-  /** "New project": made at once, named as Studio names it (Untitled, Untitled 2…), and opened. */
-  onNewProject: () => void;
+  /** "New project": made at once in the folder looked at (null: the top level), named as Studio names it (Untitled, Untitled 2…), and opened. */
+  onNewProject: (folderId: string | null) => void;
   /** "Open folder…": a folder anywhere, opened as a project (the app's own dialog, else Studio's folder browser). */
   onOpenFolder: () => void;
   /** "Get from GitHub…": a repository or a folder in one, copied into the library and opened. */
@@ -236,7 +236,8 @@ export function ProjectsView({
     };
   }
 
-  const showNew = folderId === null && !query.trim();
+  const starts = listStarts({ folderId, query });
+  const showNew = starts.newProject;
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -307,22 +308,22 @@ export function ProjectsView({
         <div className="w-full flex-1 px-6 pb-6">
           {visible.length === 0 && !showNew && !(showFolders && levelFolders.length > 0) ? (
             <div className="flex min-h-[42vh] items-center justify-center text-[14px] text-[var(--text-muted)]">
-              {folderId && !query.trim() ? t('projects.folderEmpty') : t('library.noMatches')}
+              {t('library.noMatches')}
             </div>
           ) : view === 'cards' ? (
             <div className="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 lg:grid-cols-4">
-              {showNew ? <NewProjectCard creating={creating} onNewProject={onNewProject} onOpenFolder={onOpenFolder} onGetFromGitHub={onGetFromGitHub} /> : null}
+              {showNew ? <NewProjectCard creating={creating} onNewProject={() => onNewProject(folderId)} {...(folderId === null ? { onOpenFolder, onGetFromGitHub } : {})} /> : null}
               {showFolders ? levelFolders.map((folder) => <FolderCard key={`folder:${folder.id}`} {...folderProps(folder)} />) : null}
               {visible.map((project) => <ProjectCard key={project.id} {...itemProps(project)} />)}
             </div>
           ) : (
             <div className="flex flex-col divide-y divide-[var(--border)]">
-              {showNew ? <NewProjectListRow creating={creating} onNewProject={onNewProject} onOpenFolder={onOpenFolder} onGetFromGitHub={onGetFromGitHub} /> : null}
+              {showNew ? <NewProjectListRow creating={creating} onNewProject={() => onNewProject(folderId)} {...(folderId === null ? { onOpenFolder, onGetFromGitHub } : {})} /> : null}
               {showFolders ? levelFolders.map((folder) => <FolderListRow key={`folder:${folder.id}`} {...folderProps(folder)} />) : null}
               {visible.map((project) => <ProjectListRow key={project.id} {...itemProps(project)} />)}
             </div>
           )}
-          {showNew && onOpenExample ? (
+          {starts.examples && onOpenExample ? (
             <ExamplesSection examples={examples} collapsed={examplesCollapsed} onToggle={() => onToggleExamples?.()} onOpen={onOpenExample} view={view} />
           ) : null}
         </div>
@@ -547,8 +548,9 @@ function ProjectCardTitle({
 type NewProjectProps = {
   creating: boolean;
   onNewProject: () => void;
-  onOpenFolder: () => void;
-  onGetFromGitHub: () => void;
+  /* starting from a film that exists: at the top level only (what they make is not filed in a folder) */
+  onOpenFolder?: () => void;
+  onGetFromGitHub?: () => void;
 };
 
 /** The grid's first cell: start a new project, card-sized, so "new ones start here" reads at a glance. */
@@ -570,7 +572,7 @@ function NewProjectCard({ creating, onNewProject, onOpenFolder, onGetFromGitHub 
       </button>
       {/* where the other cards have their name: starting from a film that exists */}
       <div className="mt-2 flex">
-        <ImportMenu creating={creating} onOpenFolder={onOpenFolder} onGetFromGitHub={onGetFromGitHub} className="-ml-1.5 h-7 px-1.5 text-[12.5px]" />
+        {onOpenFolder && onGetFromGitHub ? <ImportMenu creating={creating} onOpenFolder={onOpenFolder} onGetFromGitHub={onGetFromGitHub} className="-ml-1.5 h-7 px-1.5 text-[12.5px]" /> : null}
       </div>
     </article>
   );
@@ -603,13 +605,13 @@ function NewProjectListRow({ creating, onNewProject, onOpenFolder, onGetFromGitH
           {t('projects.newProject')}
         </button>
       </div>
-      <ImportMenu creating={creating} onOpenFolder={onOpenFolder} onGetFromGitHub={onGetFromGitHub} className="h-8 px-2.5 text-[12.5px]" />
+      {onOpenFolder && onGetFromGitHub ? <ImportMenu creating={creating} onOpenFolder={onOpenFolder} onGetFromGitHub={onGetFromGitHub} className="h-8 px-2.5 text-[12.5px]" /> : null}
     </article>
   );
 }
 
 /** "Import from ⌄": the ways to start from a film that exists, a folder on this computer or a repository on GitHub. */
-function ImportMenu({ creating, onOpenFolder, onGetFromGitHub, className }: Omit<NewProjectProps, 'onNewProject'> & { className: string }) {
+function ImportMenu({ creating, onOpenFolder, onGetFromGitHub, className }: Required<Omit<NewProjectProps, 'onNewProject'>> & { className: string }) {
   const t = useT();
   const [anchor, setAnchor] = React.useState<{ x: number; y: number; top: number } | null>(null);
   const button = React.useRef<HTMLButtonElement>(null);

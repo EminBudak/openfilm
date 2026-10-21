@@ -197,7 +197,6 @@ export const en = {
     setAsCover: 'Set as project cover',
     coverSet: 'Cover set',
     coverFailed: 'Couldn’t use that as the cover.',
-    folderEmpty: 'This folder is empty',
     creating: 'Creating project',
     opening: 'Opening project',
     missing: 'Folder not found',
