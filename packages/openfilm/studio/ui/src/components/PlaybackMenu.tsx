@@ -1,6 +1,6 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { Captions, Gauge, Repeat } from 'lucide-react';
+import { Gauge, Repeat } from 'lucide-react';
 import { useT } from '@/i18n';
 import { useKeyHint } from '@/lib/keymap-store';
 import { Tooltip } from './Tooltip';
@@ -15,12 +15,10 @@ export type PlaybackSettings = {
   onLoop: () => void;
   speed: number;
   onSpeed: (speed: number) => void;
-  /** Subtitles on the picture, when the film has any. */
-  captions?: { on: boolean; onToggle: () => void } | null;
 };
 
 /**
- * The viewer's playback settings: loop, subtitles on the picture, and the speed. What is not the default shows on the
+ * The viewer's playback settings: loop and the speed (subtitles are the timeline's CC button). What is not the default shows on the
  * button itself (the loop icon, "1.5×"), so it is seen without opening the menu. Nothing here takes focus on click:
  * the next Space still plays.
  */
@@ -58,7 +56,7 @@ export function PlaybackMenu({ className, disabled, settings }: {
     };
   }, [anchor]);
 
-  const { loop, ranged, onLoop, speed, onSpeed, captions } = settings;
+  const { loop, ranged, onLoop, speed, onSpeed } = settings;
   const loopLabel = t(ranged ? 'viewer.loopRange' : 'viewer.loopFilm');
   const speedText = (s: number) => `${s}×`;
   const keep = (e: React.MouseEvent) => e.preventDefault();
@@ -95,7 +93,6 @@ export function PlaybackMenu({ className, disabled, settings }: {
       style={anchor} className="fixed z-[110] w-56 rounded-[14px] border border-[var(--border)] bg-[var(--surface)] p-1.5 shadow-[0_18px_48px_-12px_rgba(0,0,0,0.45),0_2px_8px_rgba(0,0,0,0.12)]">
       <div className="px-2 pb-1 pt-1 text-[11px] font-medium text-[var(--text-faint)]">{t('viewer.playback')}</div>
       {toggle('loop', loopLabel, loop, onLoop, Repeat, keyHint('loop'))}
-      {captions ? toggle('captions', t('viewer.subtitles'), captions.on, captions.onToggle, Captions) : null}
       <div className="mx-1 my-1 h-px bg-[var(--border)]" />
       <div className="px-2 pb-1.5 pt-1 text-[11px] font-medium text-[var(--text-faint)]">{t('viewer.speed')}</div>
       <div role="radiogroup" aria-label={t('viewer.speed')} className="grid grid-cols-4 gap-1 px-1 pb-1">

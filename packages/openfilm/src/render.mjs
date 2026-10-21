@@ -1,11 +1,11 @@
 // film render: the deliverable. Frames are rendered in parallel page instances, averaged
 // over the shutter for motion blur, encoded with tagged BT.709 color, and muxed with the mix of the film's sounds.
-import { spawnSync } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { availableParallelism, freemem, totalmem } from 'node:os';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import { clipKind, FILM_FILE } from './film-doc.mjs';
-import { broken, encoders, hardwareEncoder, hardwareOptions, proresOptions } from './encoders.mjs';
+import { broken, encoders, FRAMES_709, hardwareEncoder, hardwareOptions, prores709 } from './encoders.mjs';
 import { FilmPage, launch } from './host.mjs';
 import { exactRate, ffmpegRate } from './rate.mjs';
 import { browserCopies, filmVideos } from './seekable.mjs';
@@ -17,8 +17,8 @@ const TAG_709 = ['-bsf:v', 'h264_metadata=colour_primaries=1:transfer_characteri
 /** Output formats: picture codec, pixel format, sound codec. Transparency needs .webm or .mov. */
 const FORMATS = {
   '.mp4': { video: ['-c:v', 'libx264', '-preset', 'medium', '-crf', '16', ...BT709], pix: 'scale=out_color_matrix=bt709:out_range=tv,format=yuv420p', audio: ['-c:a', 'aac', '-b:a', '192k'], tag: TAG_709 },
-  '.webm': { video: ['-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', '20', '-row-mt', '1'], pix: 'format=yuva420p', audio: ['-c:a', 'libopus', '-b:a', '160k'], tag: [] },
-  '.mov': { video: ['-c:v', 'prores_ks', '-profile:v', '4444', '-vendor', 'apl0'], pix: 'format=yuva444p10le', audio: ['-c:a', 'pcm_s16le'], tag: [] },
+  '.webm': { video: ['-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', '20', '-row-mt', '1', ...BT709], pix: `scale=out_color_matrix=bt709:out_range=tv,format=yuva420p,${FRAMES_709}`, audio: ['-c:a', 'libopus', '-b:a', '160k'], tag: [] },
+  '.mov': { ...prores709('prores_ks', true), audio: ['-c:a', 'pcm_s16le'], tag: [] },
 };
 
 /** Bits per pixel per frame for the chip's H.264: Studio's "high", with room for screen text (exports.mjs). */
@@ -39,9 +39,19 @@ async function chipFormat(ext, size, fps) {
   }
   if (ext === '.mov') {
     const encoder = await hardwareEncoder('prores', have);
-    return encoder ? { encoder, format: proresOptions(encoder, true) } : null;
+    return encoder ? { encoder, format: prores709(encoder, true) } : null;
   }
   return null;
+}
+
+/** `from` renamed `to`, if the system lets it now: not onto another disk, nor a file Windows still holds a moment. @param {string} from @param {string} to */
+function moved(from, to) {
+  try {
+    renameSync(from, to);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** The encoder a format's picture options name. @param {string[] | undefined} video */
@@ -76,7 +86,18 @@ export async function render(args, opts = {}) {
     if (clipKind(file) === 'video') videos.add(file);
     return copies.get(file) ?? null;
   };
-  const probe = await open(target, { ...(opts.root ? { root: opts.root } : {}), swap });
+  /* `browsers` (a BrowserPool): the render borrows `workers` of its browsers, draws in a tab of its own in each, and
+     gives them back; else it starts its own and closes them */
+  const pool = opts.browsers ?? null;
+  const lent = pool ? await pool.take(Math.max(1, Number(opts.workers ?? 1))) : [];
+  let failed = true;
+  let probe;
+  try {
+    probe = await open(target, { ...(opts.root ? { root: opts.root } : {}), swap, ...(pool ? { browser: lent[0] } : {}) });
+  } catch (e) {
+    await pool?.give(lent, { retire: true });
+    throw e;
+  }
   const { entry, dir, name, site, browser, isFilm, root } = probe;
   const meta = probe.film.meta;
   await probe.film.close();
@@ -86,12 +107,12 @@ export async function render(args, opts = {}) {
   const fps = rate.fps;
   /* a page without a duration has no end: it is rendered by a range */
   const end = meta.duration ?? Infinity;
-  if (!range && meta.duration == null) { await probe.close(); throw new UsageError('this page has no duration, so it has no end: give a range to render, e.g. openfilm render 0-6'); }
+  if (!range && meta.duration == null) { await probe.close(); await pool?.give(lent); throw new UsageError('this page has no duration, so it has no end: give a range to render, e.g. openfilm render 0-6'); }
   const [from, to] = range ? [range[0], Math.min(range[1], end)] : [0, end];
   const f0 = Math.round(from * fps);
   const f1 = Math.round(to * fps);
   const total = f1 - f0;
-  if (total <= 0) { await probe.close(); throw new UsageError(`nothing to render between ${fmt(from)} and ${fmt(to)}${meta.duration != null ? `: the film is ${fmt(meta.duration)} long` : ''}`); }
+  if (total <= 0) { await probe.close(); await pool?.give(lent); throw new UsageError(`nothing to render between ${fmt(from)} and ${fmt(to)}${meta.duration != null ? `: the film is ${fmt(meta.duration)} long` : ''}`); }
   if (range && range[1] > end) console.error(`openfilm render: ${fmt(range[0])}-${fmt(range[1])} runs past the film's end (${fmt(meta.duration)}): rendered to there`);
   const scale = opts.scale ?? (opts['4k'] ? 3840 / meta.width : 1);
   const samples = Math.max(1, Number(opts.samples ?? (opts.blur ? 8 : 1)));
@@ -103,16 +124,22 @@ export async function render(args, opts = {}) {
     : join(dir, `${name}${alpha ? '.webm' : '.mp4'}`)));
   mkdirSync(dirname(out), { recursive: true });
   const container = FORMATS[extname(out).toLowerCase()];
-  if (!container) { await probe.close(); throw new UsageError(`can't write ${extname(out)}: use .mp4, .webm or .mov`); }
-  if (alpha && extname(out).toLowerCase() === '.mp4') { await probe.close(); throw new UsageError('mp4 has no transparency: write .webm or .mov with --alpha'); }
+  if (!container) { await probe.close(); await pool?.give(lent); throw new UsageError(`can't write ${extname(out)}: use .mp4, .webm or .mov`); }
+  if (alpha && extname(out).toLowerCase() === '.mp4') { await probe.close(); await pool?.give(lent); throw new UsageError('mp4 has no transparency: write .webm or .mov with --alpha'); }
   /* a host may encode the container its own way (Studio's export: another codec, a quality, a frame around the film),
      and gets exactly that; else the picture goes through the graphics chip when it can */
   const own = { ...container, ...opts.format };
+  /* `clear` (with `alpha`): the format for a page that lets anything through. The page is drawn with `format` while
+     every frame is opaque, each frame's alpha read as it is drawn; at the first pixel that shows through it is drawn
+     again with `clear`, in the same tabs (an editing project's page: H.264 when it can, PNG with its alpha when not).
+     The result says which (`clear`) */
+  const clearFormat = alpha && opts.clear ? { ...container, ...opts.clear } : null;
+  let clear = false;
   const size = { w: Math.round(meta.width * scale), h: Math.round(meta.height * scale) };
   const chip = opts.format || opts.hardware === false ? null : await chipFormat(extname(out).toLowerCase(), size, fps);
   let format = chip ? { ...own, ...chip.format } : own;
   let encoder = chip?.encoder ?? encoderOf(own.video);
-  const workers = Math.max(1, Math.min(Number(opts.workers ?? defaultWorkers(machine(), total)), total));
+  const workers = Math.max(1, Math.min(pool ? lent.length : Number(opts.workers ?? defaultWorkers(machine(), total)), total));
   /* the videos get copies this browser plays: those it does not decode here (ProRes; HEVC without a chip for it), and
      for a render of more than a moment those that seek slowly (seekable.mjs). A film's video clips load only when
      their time comes, so they are read from film.html (a page drawn around the project's film, as a burned-in
@@ -120,10 +147,17 @@ export async function render(args, opts = {}) {
   if (opts.seekable !== false) {
     const film = isFilm ? entry : opts.root ? FILM_FILE : null;
     const files = [...new Set([...videos, ...(film ? filmVideos(root, film) : [])])];
-    copies = await browserCopies(browser, site.url, root, files, { signal: opts.signal, slow: total >= fps * 2 });
+    try {
+      copies = await browserCopies(browser, site.url, root, files, { signal: opts.signal, slow: total >= fps * 2 });
+    } catch (e) {
+      await probe.close();
+      await pool?.give(lent, { retire: true });
+      throw e;
+    }
   }
 
   if (!process.stderr.isTTY && !opts.onProgress) process.stderr.write(`  rendering ${total} frames with ${workers} browser${workers > 1 ? 's' : ''}…\n`);
+  /* a pool's process draws several renders at once, each of its own film folder (Studio's export makes one per page) */
   const work = join(outDir(dir, 'render'), `.parts-${process.pid}`);
   mkdirSync(work, { recursive: true });
   let done = 0;
@@ -150,72 +184,114 @@ export async function render(args, opts = {}) {
   cancelled.catch(() => {});
   /** @type {import('playwright-core').Browser[]} */
   const browsers = [];
+  /** @type {FilmPage[]} the tabs drawing, closed at the end (a pool's browsers stay open) */
+  const tabs = [];
   /* what is left of a step given up fails as the browsers close: that is no one's error */
-  const unlessCancelled = (/** @type {Promise<any>} */ step) => { step.catch(() => {}); return Promise.race([step, cancelled]); };
+  /* a browser that closes while drawing (a crash, or the system ending it for memory) ends the render at once: its tab may never
+     answer again, and nothing it was drawing is waited for */
+  const gone = new Error('the browser drawing the page closed (it crashed, or the system ended it)');
+  /** @type {(e: Error) => void} */
+  let crash = () => {};
+  const crashed = new Promise((_, fail) => { crash = fail; });
+  crashed.catch(() => {});
+  /** @type {(() => void)[]} */
+  const unwatch = [];
+  const watch = (/** @type {import('playwright-core').Browser} */ b) => {
+    const closed = () => crash(gone);
+    b.on('disconnected', closed);
+    unwatch.push(() => b.off('disconnected', closed));
+    if (!b.isConnected()) closed();
+  };
+  const unlessCancelled = (/** @type {Promise<any>} */ step) => { step.catch(() => {}); return Promise.race([step, cancelled, crashed]); };
   try {
     /* a browser each: pages sharing one browser share its GPU process, and stop getting faster after three or four */
-    const more = await unlessCancelled(Promise.all(Array.from({ length: workers - 1 }, () => launch().then((b) => { browsers.push(b); return b; }))));
-    const pages = await unlessCancelled(Promise.all([browser, ...more].map((b) => FilmPage.open(b, site.url, entry, { scale, transparent: alpha }))));
+    const more = pool ? lent.slice(1, workers) : await unlessCancelled(Promise.all(Array.from({ length: workers - 1 }, () => launch().then((b) => { browsers.push(b); return b; }))));
+    for (const b of [browser, ...more]) watch(b);
+    const opening = [browser, ...more].map((b) => FilmPage.open(b, site.url, entry, { scale, transparent: alpha }).then((p) => { tabs.push(p); return p; }));
+    const pages = await unlessCancelled(Promise.all(opening));
     /* a film paints its stage behind its clips (black, or its own background): with alpha, only what the clips draw is kept */
     if (alpha && isFilm) await Promise.all(pages.map((p) => p.page.addStyleTag({ content: 'html, body { background: transparent !important; }' })));
     const per = Math.ceil(total / workers);
     const parts = pages.map((film, i) => ({ film, a: f0 + i * per, b: Math.min(f1, f0 + (i + 1) * per), file: join(work, `part-${i}${extname(out)}`) })).filter((p) => p.a < p.b);
-    /** Every part, encoded with `f`: one that fails stops the others before its error is told. @param {typeof format} f */
-    const encodeAll = async (f) => {
+    /** Every part, encoded with `f`: one that fails stops the others before its error is told. @param {typeof format} f @param {boolean} opaque */
+    const encodeAll = async (f, opaque) => {
       const stop = new AbortController();
       const quit = () => stop.abort();
       opts.signal?.addEventListener('abort', quit, { once: true });
-      const runs = parts.map((p) => encode(p, { fps, rate, samples, shutter, duration: end, format: f, onFrame: progress, still: alpha ? 'png' : 'jpeg', signal: stop.signal }));
+      const runs = parts.map((p) => encode(p, { fps, rate, samples, shutter, duration: end, first: f0, format: f, onFrame: progress, still: alpha ? 'png' : 'jpeg', opaque, signal: stop.signal }));
       try {
         await unlessCancelled(Promise.all(runs));
       } catch (e) {
         stop.abort();
-        await Promise.allSettled(runs);
-        throw outOfMemory(e, parts.length);
+        if (e !== gone) await Promise.allSettled(runs);
+        throw e === gone ? e : outOfMemory(e, parts.length);
       } finally {
         opts.signal?.removeEventListener('abort', quit);
       }
     };
+    /** The frames with `f`, watched for a pixel that shows through while the page may be opaque. @param {typeof format} f */
+    const drawAll = async (f) => {
+      if (!clearFormat || clear) return encodeAll(f, false);
+      try {
+        await encodeAll(f, true);
+      } catch (e) {
+        if (/** @type {{ code?: unknown }} */ (e)?.code !== 'CLEAR') throw e;
+        /* a pixel shows through: every part stopped between two frames, and the frames are drawn again with alpha */
+        clear = true;
+        format = clearFormat;
+        encoder = encoderOf(format.video);
+        done = 0;
+        told = 0;
+        await encodeAll(format, false);
+      }
+    };
     try {
-      await encodeAll(format);
+      await drawAll(format);
     } catch (e) {
       /* the chip's encoder gave up partway (a driver, a size it does not take): the frames again without it, and the
          rest of this launch does without it */
-      if (!chip || opts.signal?.aborted || !/^ffmpeg/.test(e instanceof Error ? e.message : '')) throw e;
+      if (!chip || clear || opts.signal?.aborted || !/^ffmpeg/.test(e instanceof Error ? e.message : '')) throw e;
       broken(chip.encoder);
       format = own;
       encoder = encoderOf(own.video);
       done = 0;
       told = 0;
-      await encodeAll(format);
+      await drawAll(format);
     }
     if (process.stderr.isTTY && !opts.onProgress) process.stderr.write('\n');
     for (const p of pages) problems.push(...p.problems);
 
-    /* names, not paths: concat reads them beside the list, and a path can hold a `'` (C:\\Users\\O'Brien) */
-    writeFileSync(join(work, 'list.txt'), parts.map((p) => `file '${basename(p.file)}'`).join('\n'));
-    const video = join(work, `video${extname(out)}`);
-    await ffmpeg(['-f', 'concat', '-safe', '0', '-i', join(work, 'list.txt'), '-c', 'copy', video]).done;
     const clips = opts.silent ? [] : await filmSound(probe, from);
     if (opts.signal?.aborted) throw new Error('cancelled');
-    if (clips.length) {
-      const sound = join(work, `sound${extname(out) === '.mp4' ? '.m4a' : extname(out) === '.webm' ? '.webm' : '.wav'}`);
-      await mix(clips, to - from, sound, format.audio);
-      await ffmpeg(['-i', video, '-i', sound, '-map', '0:v', '-map', '1:a', '-c', 'copy', ...format.tag, ...(extname(out) === '.mp4' ? ['-movflags', '+faststart'] : []), out]).done;
-    } else {
-      await ffmpeg(['-i', video, '-c', 'copy', ...format.tag, ...(extname(out) === '.mp4' ? ['-movflags', '+faststart'] : []), out]).done;
+    const sound = clips.length ? join(work, `sound${extname(out) === '.mp4' ? '.m4a' : extname(out) === '.webm' ? '.webm' : '.wav'}`) : null;
+    if (sound) await mix(clips, to - from, sound, format.audio);
+    const after = [...format.tag, ...(extname(out) === '.mp4' ? ['-movflags', '+faststart'] : [])];
+    /* the parts straight into `out`, with the sound: a page's frames are on the disk twice at most while it is written,
+       not three times (a long page drawn as PNG for an editing project is gigabytes). A part with nothing to add is
+       `out` already, moved into place */
+    if (parts.length > 1 || sound || after.length || !moved(parts[0].file, out)) {
+      /* names, not paths: concat reads them beside the list, and a path can hold a `'` (C:\\Users\\O'Brien) */
+      if (parts.length > 1) writeFileSync(join(work, 'list.txt'), parts.map((p) => `file '${basename(p.file)}'`).join('\n'));
+      const video = parts.length > 1 ? ['-f', 'concat', '-safe', '0', '-i', join(work, 'list.txt')] : ['-i', parts[0].file];
+      await ffmpeg([...video, ...(sound ? ['-i', sound, '-map', '0:v', '-map', '1:a'] : []), '-c', 'copy', ...after, out]).done;
     }
+    failed = false;
   } finally {
     /* Windows lets go of a file a moment after ffmpeg exits, and later still after one that failed: a folder it
        still holds is left behind rather than told in place of what went wrong */
+    for (const off of unwatch) off();
     try { rmSync(work, { recursive: true, force: true, maxRetries: 5 }); } catch {}
     await Promise.allSettled(browsers.map((b) => b.close()));
+    if (pool) await Promise.allSettled(tabs.map((p) => p.close()));
     await probe.close();
+    /* a render that failed or was cancelled may have left a browser stuck: those are not lent again */
+    await pool?.give(lent, { retire: failed });
   }
   const seconds = (Date.now() - started) / 1000;
   return {
     out,
     encoder,
+    ...(clearFormat ? { clear } : {}),
     lines: [
       `→ ${shown(out)}`,
       `  ${total} frames · ${fmt(to - from)} at ${Number(fps.toFixed(3))} fps · ${Math.round(meta.width * scale)}×${Math.round(meta.height * scale)}${samples > 1 ? ` · ${samples} samples/frame` : ''}${alpha ? ' · alpha' : ''} · ${workers} worker${workers > 1 ? 's' : ''} · ${encoder} · ${seconds.toFixed(1)} s`,
@@ -266,37 +342,90 @@ export function defaultWorkers({ cores, available } = machine(), frames = Infini
   return Math.max(1, Math.min(MAX_WORKERS, cores - 1, Math.floor((available - RESERVE) / WORKER_MEMORY), Math.floor(frames / FRAMES_PER_WORKER)));
 }
 
+/** What a part drawn opaque (render's `clear`) stops with: a pixel that shows through, or alpha that could not be read. @param {string} where */
+const showsThrough = (where) => Object.assign(new Error(`a pixel shows through ${where}`), { code: 'CLEAR' });
+
+/**
+ * Each frame's least alpha, read as the frames are drawn: an ffmpeg beside the encoder takes the same pictures (a
+ * picture with nothing clear comes from the browser as a PNG with no alpha, read as opaque). It starts at the first
+ * picture (no probing: the stream is known), decodes one at a time (threads would hold a dozen back) and says each
+ * frame's at once (`direct`: not held for a buffer to fill), so a render stops a few frames after a pixel shows
+ * through. `clear` turns true at that pixel; `read` counts the frames read; `ended`, its exit code.
+ */
+function alphaWatch() {
+  const proc = spawn('ffmpeg', ['-hide_banner', '-nostdin', '-loglevel', 'error', '-probesize', '32', '-analyzeduration', '0', '-threads', '1', '-f', 'image2pipe', '-c:v', 'png', '-i', '-',
+    '-vf', 'format=rgba,alphaextract,format=gray,signalstats,metadata=print:key=lavfi.signalstats.YMIN:file=-:direct=1', '-f', 'null', '-'], { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
+  proc.stdin.on('error', () => {});
+  const watch = { proc, read: 0, clear: false, ended: new Promise((done) => { proc.on('error', () => done(-1)); proc.on('close', (code) => done(code)); }) };
+  let rest = '';
+  proc.stdout.on('data', (d) => {
+    const lines = (rest + d).split('\n');
+    rest = lines.pop() ?? '';
+    for (const line of lines) {
+      const m = /YMIN=(\d+)/.exec(line);
+      if (!m) continue;
+      watch.read++;
+      if (Number(m[1]) < 255) watch.clear = true;
+    }
+  });
+  return watch;
+}
+
 /** Frames [a, b) of one page into one file; sub-frames are averaged by ffmpeg (tmix) and every n-th kept. */
-async function encode({ film, a, b, file }, { fps, rate, samples, shutter, duration, format, onFrame, still, signal }) {
+async function encode({ film, a, b, file }, { fps, rate, samples, shutter, duration, first = a, format, onFrame, still, opaque, signal }) {
   const blur = samples > 1 ? `tmix=frames=${samples},select='eq(mod(n\\,${samples})\\,${samples - 1})',setpts=N/((${ffmpegRate(rate)})*TB),` : '';
   const enc = ffmpeg(['-f', 'image2pipe', '-framerate', ffmpegRate(rate, samples), '-c:v', still === 'png' ? 'png' : 'mjpeg', '-i', '-',
     '-vf', blur + format.pix, '-r', ffmpegRate(rate), ...format.video, file], { input: true });
+  /* a page drawn opaque: its alpha read beside the encoder, every frame */
+  const watch = opaque ? alphaWatch() : null;
   /* a cancelled render stops its encoder at once: the frames ffmpeg still holds are thrown away, not encoded (a 4K
      encode takes seconds to drain); the parts folder goes with it (see render's finally) */
-  const stop = () => kill(enc.proc);
+  const stop = () => { kill(enc.proc); if (watch) kill(watch.proc); };
   enc.proc.stdin.on('error', () => {});
+  /* a watch that ends before the last frame cannot say the page is opaque */
+  const unwatched = watch?.ended.then(() => { throw showsThrough('(its alpha could not be read)'); });
+  unwatched?.catch(() => {});
   /* an ffmpeg that ends before its last frame (not found, an encoder that fails to start) never drains its input:
      the frame being written fails with ffmpeg's own error instead of waiting for it forever */
   const ended = enc.done.then(() => { throw new Error('ffmpeg ended before the last frame'); });
   ended.catch(() => {});
   signal?.addEventListener('abort', stop, { once: true });
   try {
+    /* a tab's first two pictures come out a little off the rest (a transparent page's soft edges, by a level or two):
+       two are taken and thrown away first, of the two frames before this part (of its first frame for the render's
+       first part), so a frame is the same however many browsers share the render */
+    for (const f of [a - 2, a - 1].map((n) => Math.max(first, n))) {
+      await film.seek(Math.min(Math.max(0, f / fps), duration - 1e-4));
+      await film.capture(still === 'png' ? { format: 'png' } : { format: 'jpeg', quality: 95 });
+    }
     for (let f = a; f < b; f++) {
       if (signal?.aborted) {
         stop();
         throw new Error('cancelled');
+      }
+      if (watch?.clear) {
+        stop();
+        throw showsThrough(`by ${fmt(f / fps)}`);
       }
       for (let k = 0; k < samples; k++) {
         const t = (f + (samples > 1 ? (k / samples - 0.5) * shutter : 0)) / fps;
         await film.seek(Math.min(Math.max(0, t), duration - 1e-4));
         const frame = await film.capture(still === 'png' ? { format: 'png' } : { format: 'jpeg', quality: 95 });
         await Promise.race([write(enc.proc.stdin, frame), ended]);
+        if (watch) await Promise.race([write(watch.proc.stdin, frame), unwatched]);
       }
       onFrame();
     }
   } finally {
     signal?.removeEventListener('abort', stop);
     enc.proc.stdin.end();
+    watch?.proc.stdin.end();
   }
   await enc.done;
+  /* opaque only when every frame was read and none let anything through */
+  if (watch) {
+    const code = await watch.ended;
+    if (watch.clear) throw showsThrough('in its last frames');
+    if (code !== 0 || watch.read !== (b - a) * samples) throw showsThrough(`(its alpha could not be read: ${watch.read} of ${(b - a) * samples} frames, exit ${code})`);
+  }
 }

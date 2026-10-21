@@ -1,12 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { getPriority, tmpdir, totalmem } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { BrowserPool } from './browser-pool.mjs';
 import { encoders, hardwareEncoder } from './encoders.mjs';
 import { filmHtml } from './film-doc.mjs';
+import { launch } from './host.mjs';
 import { defaultWorkers, machine, outOfMemory, render } from './render.mjs';
 
 const hasFfmpeg = (() => { try { execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); return true; } catch { return false; } })();
@@ -145,6 +147,93 @@ test('a render runs below the person\'s own apps, with every process it starts',
     await ended;
     assert.equal(priority, 10);
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a transparent page comes out the same however many browsers share it', { skip: !hasFfmpeg && 'no ffmpeg', timeout: 180_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'of-render-split-'));
+  try {
+    /* soft, see-through shapes turning over nothing: where a tab's first pictures used to come out a level off */
+    writeFileSync(join(dir, 'page.html'), `<!doctype html><style>html,body{margin:0;width:960px;height:540px;background:transparent}
+.b{position:absolute;width:120px;height:120px;border-radius:24px;background:linear-gradient(135deg,hsla(200,80%,60%,.8),hsla(320,80%,40%,.6));box-shadow:0 16px 48px rgba(0,0,0,.4)}</style>
+<body><script>const els=[];for(let k=0;k<24;k++){const d=document.createElement('div');d.className='b';document.body.appendChild(d);els.push(d)}
+window.film={duration:2,width:960,height:540,frame(t){els.forEach((d,k)=>{const a=t*0.9+k*0.37;d.style.transform='translate('+(480+Math.cos(a)*(150+k*8)-60)+'px,'+(270+Math.sin(a*1.3)*(100+k*4)-60)+'px) rotate('+(a*60)+'deg) scale('+(0.6+0.4*Math.sin(a+k))+')'})}};</script></body>`);
+    writeFileSync(join(dir, 'film.html'), filmHtml({ stage: { w: 960, h: 540 }, tracks: [{ clips: [{ src: 'page.html', id: 'page' }] }] }));
+    const format = { video: ['-c:v', 'png'], pix: 'format=rgba' };
+    const sums = (file) => execFileSync('ffmpeg', ['-v', 'error', '-i', file, '-vf', 'format=rgba', '-f', 'framemd5', '-']).toString().split('\n').filter((l) => l && !l.startsWith('#')).map((l) => l.split(',').pop());
+    const drawn = [];
+    for (const workers of [1, 3]) {
+      const out = join(dir, `w${workers}.mov`);
+      await render([dir], { out, workers, alpha: true, silent: true, onProgress() {}, format });
+      drawn.push(sums(out));
+    }
+    assert.equal(drawn[0].length, 60);
+    assert.deepEqual(drawn[1].map((s, i) => (s === drawn[0][i] ? '' : i)).filter(String), [], 'no frame differs');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a render is written once: its parts straight into the file with the sound, and one part with nothing to add moved there', { skip: !hasFfmpeg && 'no ffmpeg', timeout: 180_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'of-render-once-'));
+  try {
+    writeFileSync(join(dir, 'p.html'), '<!doctype html><body style="margin:0"><script>window.film = { duration: 1, width: 320, height: 180, frame(t) { document.body.style.background = `hsl(${t * 360}, 80%, 50%)`; } };</script>');
+    execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', join(dir, 'tone.wav')]);
+    writeFileSync(join(dir, 'film.html'), filmHtml({ stage: { w: 320, h: 180 }, tracks: [{ clips: [{ id: 'p', src: 'p.html', at: 0, time: [0, 1] }] }, { clips: [{ id: 'tone', src: 'tone.wav' }] }] }));
+    const probe = (file) => JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-count_frames', '-show_entries', 'stream=codec_type,nb_read_frames,duration', '-of', 'json', file], { encoding: 'utf8' })).streams;
+    for (const [ext, workers] of [['.mp4', 1], ['.mp4', 2], ['.mov', 1], ['.mov', 2]]) {
+      const streams = probe((await render([dir], { out: join(dir, `w${workers}${ext}`), workers, onProgress() {} })).out);
+      assert.equal(Number(streams.find((s) => s.codec_type === 'video')?.nb_read_frames), 30, `${ext} by ${workers}: its frames`);
+      assert.ok(Math.abs(Number(streams.find((s) => s.codec_type === 'audio')?.duration) - 1) < 0.05, `${ext} by ${workers}: its sound`);
+    }
+    /* the part a browser writes is the file, not copied: the same one on the disk */
+    const part = join(dir, '.film', 'cache', 'render', `.parts-${process.pid}`, 'part-0.mov');
+    let ino = null;
+    const look = setInterval(() => { if (existsSync(part)) ino = statSync(part).ino; }, 5);
+    const quiet = join(dir, 'quiet.mov');
+    try {
+      await render([dir], { out: quiet, workers: 1, silent: true, onProgress() {} });
+    } finally {
+      clearInterval(look);
+    }
+    assert.ok(ino != null, 'the part was seen while drawn');
+    /* Windows may hold the part a moment after ffmpeg ends (an antivirus reading it): then it is copied, as before */
+    if (process.platform !== 'win32') assert.equal(statSync(quiet).ino, ino);
+    assert.equal(probe(quiet).length, 1, 'no sound asked for');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a page drawn opaque until a pixel shows through is drawn again with its alpha, in the same tabs', { skip: !hasFfmpeg && 'no ffmpeg', timeout: 180_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'of-render-opaque-'));
+  let started = 0;
+  const pool = new BrowserPool({ start: () => { started++; return launch(); } });
+  try {
+    /* both fill the frame for 4 s; `blink` lets everything through at 0.4 s (frame 10 at 25 fps) */
+    const page = (clearAt) => `<!doctype html><body style="margin:0;width:320px;height:180px"><script>window.film={duration:4,width:320,height:180,frame(t){
+document.body.style.background=${clearAt === null ? 'false' : `Math.abs(t-${clearAt})<0.01`}?'transparent':'hsl('+Math.round(t*90)+',70%,40%)'}}</script></body>`;
+    writeFileSync(join(dir, 'blink.html'), page(0.4));
+    writeFileSync(join(dir, 'solid.html'), page(null));
+    const formats = { format: { video: ['-c:v', 'libx264', '-crf', '16'], pix: 'format=yuv420p' }, clear: { video: ['-c:v', 'png'], pix: 'format=rgba' } };
+    const ask = (name, onProgress = () => {}) => render([join(dir, `${name}.html`)], { alpha: true, silent: true, fps: 25, workers: 1, browsers: pool, ...formats, out: join(dir, `${name}.mov`), onProgress });
+    const probe = (file) => execFileSync('ffprobe', ['-v', 'error', '-count_frames', '-show_entries', 'stream=codec_name,pix_fmt,nb_read_frames', '-of', 'csv=p=0', file]).toString().trim();
+    const drawn = [];
+    const blink = await ask('blink', (done) => drawn.push(done));
+    assert.deepEqual([blink.clear, blink.encoder], [true, 'png']);
+    /* opaque to a few frames past the clear one, then again from the first */
+    const again = drawn.findIndex((d, i) => i && d < drawn[i - 1]);
+    assert.ok(again > 0 && drawn[again - 1] >= 10 && drawn[again - 1] < 40, `drawn again after ${drawn[again - 1]} of 100 frames`);
+    assert.equal(probe(blink.out), 'png,rgba,100');
+    const at10 = execFileSync('ffmpeg', ['-v', 'error', '-i', blink.out, '-vf', 'select=eq(n\\,10),format=rgba,crop=1:1:10:10', '-frames:v', '1', '-f', 'rawvideo', '-']);
+    assert.equal(at10[3], 0, 'that frame clear');
+    const solid = await ask('solid');
+    assert.deepEqual([solid.clear, solid.encoder], [false, 'libx264']);
+    assert.equal(probe(solid.out), 'h264,yuv420p,100', 'every frame read and none clear: written as it was drawn');
+    assert.equal(started, 1, 'one browser for both pages');
+  } finally {
+    await pool.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });

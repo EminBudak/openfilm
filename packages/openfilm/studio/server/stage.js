@@ -529,7 +529,20 @@
       const value = styleValue(el, key, cs);
       if (value != null && value !== '') style[key] = value;
     }
+    /* words drawn in a fill of their page's own (-webkit-text-fill-color: gold or gradient words), not in their color */
+    if (kind === 'text' && !isSvgText(el) && ownTextFill(el)) style.WebkitTextFillColor = styleValue(el, 'WebkitTextFillColor', cs);
     return style;
+  };
+  /**
+   * Whether `el`'s words are drawn in a fill of their own rather than their color. A fill that follows the color
+   * reads as that color, so the color is changed for a moment (nothing is drawn in between) to see if it follows.
+   */
+  const ownTextFill = (el) => {
+    const was = el.getAttribute('style');
+    el.style.setProperty('color', 'rgb(1, 2, 3)', 'important');
+    const fill = css(el).webkitTextFillColor;
+    if (was == null) el.removeAttribute('style'); else el.setAttribute('style', was);
+    return fill !== 'rgb(1, 2, 3)';
   };
 
   const labelOf = (el, kind) => {
@@ -747,7 +760,7 @@
     if (blocks) holdBlocks(c, blocks, g0, paintedOf(el));
   };
   /* what a block keeps when the line it is written in changes: its look (the type it takes from the line) and its place */
-  const INHERITED = ['color', 'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing', 'lineHeight', 'wordSpacing', 'textTransform', 'textAlign', 'textShadow', 'fontVariant'];
+  const INHERITED = ['color', 'WebkitTextFillColor', 'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing', 'lineHeight', 'wordSpacing', 'textTransform', 'textAlign', 'textShadow', 'fontVariant'];
   const blockNow = (b) => {
     const cs = css(b);
     const turn = totalTurn(b);

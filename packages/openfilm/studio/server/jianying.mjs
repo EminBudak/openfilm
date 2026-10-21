@@ -25,6 +25,7 @@
  *     lists none of them and finds a video by nothing but its path.
  */
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -40,15 +41,22 @@ import { join } from 'node:path';
 const APP_FOLDER = /** @type {Record<DraftApp, string>} */ ({ jianying: 'JianyingPro', capcut: 'CapCut' });
 
 /**
- * Where 剪映 or CapCut keeps its drafts by default (its Settings › Drafts location can move them): the folder when it
- * is there, else null.
+ * Where 剪映 or CapCut keeps its drafts: the folder its Settings › Drafts location names (`currentCustomDraftPath` in
+ * its `User Data/Config/globalSetting`, the same in both apps), else its default one, when that folder is there; else
+ * null. A draft made anywhere else is not on the app's home screen.
  * @param {DraftApp} app
- * @param {{ platform?: NodeJS.Platform, home: string, localAppData?: string, exists: (path: string) => boolean }} where
+ * @param {{ platform?: NodeJS.Platform, home: string, localAppData?: string, exists: (path: string) => boolean, read?: (path: string) => string }} where
  */
-export function draftsRoot(app, { platform = process.platform, home, localAppData, exists }) {
+export function draftsRoot(app, { platform = process.platform, home, localAppData, exists, read = (path) => readFileSync(path, 'utf8') }) {
   const base = platform === 'darwin' ? join(home, 'Movies') : platform === 'win32' ? localAppData ?? join(home, 'AppData', 'Local') : null;
-  const dir = base && join(base, APP_FOLDER[app], 'User Data', 'Projects', 'com.lveditor.draft');
-  return dir && exists(dir) ? dir : null;
+  if (!base) return null;
+  const user = join(base, APP_FOLDER[app], 'User Data');
+  let chosen = null;
+  try {
+    chosen = /^currentCustomDraftPath=(.+)$/m.exec(read(join(user, 'Config', 'globalSetting')))?.[1].trim() || null;
+  } catch { /* the app has saved no settings yet */ }
+  for (const dir of [chosen, join(user, 'Projects', 'com.lveditor.draft')]) if (dir && exists(dir)) return dir;
+  return null;
 }
 
 /** 剪映 ids: 32 hex digits for materials and clips, an upper-case UUID for the draft. */

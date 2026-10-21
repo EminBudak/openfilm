@@ -41,6 +41,24 @@ test("an agent is found by any of its names, and in its own installer's folder o
   assert.equal(detectAgentInstallation('codebuddy', { ...none, pathDirs: [bin] }).cli, join(bin, 'cbc'));
 });
 
+test("DeepSeek Harness is found inside its desktop app on a Mac, which carries the command, and from the app the person chooses", () => {
+  if (process.platform === 'win32') return;
+  const home = mkdtempSync(join(tmpdir(), 'of-home-'));
+  const apps = join(home, 'Applications');
+  const none = { home, env: { PATH: '' }, pathDirs: [], applicationDirs: [apps] };
+  assert.equal(detectAgentInstallation('deepseek', none).cli, null);
+  const dsh = join(apps, 'DeepSeek Harness.app', 'Contents', 'Resources', 'runtime', 'cli', 'bin', 'dsh');
+  mkdirSync(join(dsh, '..'), { recursive: true });
+  writeFileSync(dsh, '#!/bin/sh', { mode: 0o755 });
+  assert.equal(detectAgentInstallation('deepseek', none).cli, dsh);
+  assert.equal(chosenProgram(join(apps, 'DeepSeek Harness.app'), { names: ['dsh'], win: false }), dsh);
+  /* one linked into the PATH (its own setting, or npm's @deepseek-ai/dsh) comes first */
+  const bin = join(home, 'bin');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'dsh'), '', { mode: 0o755 });
+  assert.equal(detectAgentInstallation('deepseek', { ...none, env: { PATH: bin } }).cli, join(bin, 'dsh'));
+});
+
 /** a file, its folders made */
 const put = (file, text = '', mode = 0o644) => { mkdirSync(join(file, '..'), { recursive: true }); writeFileSync(file, text, { mode }); return file; };
 

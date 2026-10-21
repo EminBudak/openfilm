@@ -90,6 +90,15 @@ export function folderFiles(root, { inject = `<script>${HOST_FLAG}</script>`, ti
       else void frameDuration(file).then(answer);
       return true;
     }
+    if (path.endsWith('/__film/media-facts')) {
+      /* what a video or sound is when the browser cannot read it (ProRes, a codec it has no decoder for): its length
+         and picture size as ffprobe reads them (`?of=` the file, from the film's folder) */
+      const file = fileInRoot(root, `${path.slice(0, -'/__film/media-facts'.length)}/${query?.get('of') ?? ''}`);
+      const answer = (facts) => res.writeHead(200, { ...extraHeaders, 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(facts));
+      if (!file) answer(null);
+      else void mediaFacts(file).then(answer);
+      return true;
+    }
     let rel;
     try { rel = decodeURIComponent(path); } catch { res.writeHead(400, extraHeaders).end('bad address'); return true; }
     /* an address speaks in `/`: a `\` in it (escaped as %5C) would be a separator on Windows, past every check */
@@ -173,6 +182,32 @@ export function frameDuration(file) {
     }));
   }
   return /** @type {Promise<number | null>} */ (frameDurations.get(key));
+}
+
+/** @type {Map<string, Promise<{ duration: number, w: number, h: number } | null>>} */
+const mediaFactsOf = new Map();
+/**
+ * A video's or sound's length (s) and picture size (0 for a sound), as ffprobe reads them, once per version of the file;
+ * null when it cannot tell.
+ * @param {string} file
+ */
+export function mediaFacts(file) {
+  let key;
+  try { const stat = statSync(file); key = `${file}\0${stat.size}\0${stat.mtimeMs}`; } catch { return Promise.resolve(null); }
+  if (!mediaFactsOf.has(key)) {
+    mediaFactsOf.set(key, new Promise((done) => {
+      execFile('ffprobe', ['-v', 'error', '-show_entries', 'format=duration:stream=codec_type,width,height', '-of', 'json', file],
+        { timeout: 20_000, windowsHide: true }, (error, stdout) => {
+          if (error) { mediaFactsOf.delete(key); done(null); return; }
+          let said;
+          try { said = JSON.parse(String(stdout)); } catch { /* nothing to read */ }
+          const duration = Number(said?.format?.duration);
+          const video = said?.streams?.find((s) => s.codec_type === 'video');
+          done(duration > 0 ? { duration, w: video?.width ?? 0, h: video?.height ?? 0 } : null);
+        });
+    }));
+  }
+  return /** @type {Promise<{ duration: number, w: number, h: number } | null>} */ (mediaFactsOf.get(key));
 }
 
 /**

@@ -35,6 +35,22 @@ test('a choice an agent lists twice shows once in the menu', () => {
   assert.equal(distinctOptions(null), null);
 });
 
+test("choices an agent lists in groups show one after another, each with its group's name", () => {
+  /* DeepSeek Harness 0.2.0 groups its models by where they run */
+  const [model, effort] = distinctOptions([
+    { id: 'model', currentValue: '["deepseek-official","deepseek-v4-flash"]', options: [
+      { group: 'deepseek-official', name: 'DeepSeek', options: [{ value: '["deepseek-official","deepseek-v4-flash"]', name: 'deepseek-v4-flash' }] },
+      { group: 'deepseek-account', name: 'DeepSeek Account', options: [{ value: '["deepseek-account","deepseek-flash"]', name: 'DeepSeek-V41-Flash', description: 'Fast' }] },
+    ] },
+    { id: 'reasoning_effort', currentValue: 'high', options: [{ value: 'high', name: 'High' }] },
+  ]);
+  assert.deepEqual(model.options, [
+    { value: '["deepseek-official","deepseek-v4-flash"]', name: 'DeepSeek · deepseek-v4-flash' },
+    { value: '["deepseek-account","deepseek-flash"]', name: 'DeepSeek Account · DeepSeek-V41-Flash', description: 'Fast' },
+  ]);
+  assert.deepEqual(effort.options, [{ value: 'high', name: 'High' }]);
+});
+
 test('whose sign-in it is, as each program says it, never a key', () => {
   const claude = JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', email: 'a@b.test', orgName: 'Studio', subscriptionType: 'max' });
   assert.deepEqual(readAgentStatus('claude', claude, claude), { signedIn: true, account: { method: 'claude.ai', email: 'a@b.test', org: 'Studio', plan: 'max' } });

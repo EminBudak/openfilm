@@ -1037,7 +1037,8 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
   async function shutDown() {
     /* the file is ours unless a later Studio has written its own (with the same key: it is the machine's) */
     if (advertise && advertised()?.pid === process.pid) rmSync(runFile(), { force: true });
-    exports.stopAll();
+    /* a running export stops, and cleans up after itself while the rest closes: its half-made files go before Studio */
+    const exporting = exports.stopAll();
     fetches.stopAll();
     await closePageFrames();
     watchers.closeAll();
@@ -1045,6 +1046,7 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
     editor.closeAllConnections();
     for (const socket of streamSockets) socket.destroy();
     await new Promise((done) => editor.close(() => done(undefined)));
+    await exporting;
   }
   return studio;
 }

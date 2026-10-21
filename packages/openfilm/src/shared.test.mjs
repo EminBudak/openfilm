@@ -74,6 +74,22 @@ test('a sound\'s fades ramp its level in the mix, straight, from where its clip 
   }
 });
 
+test('a mono sound is mixed on both sides at its own level, as a browser plays it; a stereo one as it is', { timeout: 30_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'openfilm-mono-'));
+  try {
+    const mono = join(dir, 'mono.wav'), stereo = join(dir, 'stereo.wav');
+    spawnSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=1000:duration=2:sample_rate=48000', mono]);
+    spawnSync('ffmpeg', ['-v', 'error', '-y', '-i', mono, '-af', 'pan=stereo|c0=c0|c1=0*c0', stereo]);
+    const out = join(dir, 'mix.wav');
+    for (const file of [mono, stereo]) {
+      await mix([{ file, at: 0, from: 0, volume: 1, speed: 1 }], 2, out, ['-c:a', 'pcm_s16le']);
+      assert.equal(Math.round((levelAt(out, 1) / levelAt(file, 1)) * 100) / 100, 1, file);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('fadeFilter: the ramps as a per-sample expression, nothing without fades', () => {
   assert.equal(fadeFilter(undefined), '');
   assert.equal(fadeFilter({ in: 0, out: 0, length: 3, skip: 0 }), '');

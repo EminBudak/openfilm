@@ -3,7 +3,8 @@
  *
  * Once exports are queued the dialog closes and the person keeps editing; this says how far each one has got (which
  * frame, frames per second, how long is left, which encoder), opens or shows what it made, and shows a failure in
- * its own words. It is there only while there are exports to show; the project's event stream tells it every change.
+ * its own words. It is there while there are exports to show, until the person closes it; the project's event stream
+ * tells it every change.
  */
 import { Ban, Check, ChevronDown, ChevronUp, CircleAlert, FolderOpen, Loader2, Play, X } from 'lucide-react';
 import React from 'react';
@@ -24,20 +25,28 @@ import {
   type ExportJob,
 } from '@/lib/export-jobs';
 
-/** A finished export's card stays this long after the last one ends. */
-const AUTO_HIDE_MS = 12_000;
-/** Reopening the project shows exports that ended this recently (a failure a little longer). */
-const DONE_KEPT_MS = 2 * 60_000;
-const FAILED_KEPT_MS = 10 * 60_000;
+/* A card stays until the person closes it: a finished export is found where it was left, its file one click away.
+   Closed ones stay closed while Studio runs, the project or the page opened again or not (its exports are this
+   launch's): kept in the tab's session storage, which may refuse (a private window), then for as long as the page. */
+const closedByProject = new Map<string, Set<string>>();
+const CLOSED_KEY = 'openfilm.exportTray.closed';
+function closedOf(projectId: string): Set<string> {
+  const known = closedByProject.get(projectId);
+  if (known) return known;
+  let ids: string[] = [];
+  try { ids = JSON.parse(sessionStorage.getItem(`${CLOSED_KEY}.${projectId}`) ?? '[]'); } catch { /* nothing kept */ }
+  return new Set(Array.isArray(ids) ? ids.filter((id) => typeof id === 'string') : []);
+}
+function keepClosed(projectId: string, ids: Set<string>) {
+  closedByProject.set(projectId, ids);
+  try { sessionStorage.setItem(`${CLOSED_KEY}.${projectId}`, JSON.stringify([...ids])); } catch { /* kept for this page only */ }
+}
 
 export interface ExportTrayHandle {
   /** Exports were just queued: show them now. */
   push: (jobs: ExportJob[]) => void;
 }
 
-/** Only what is running or just ended: exports finished long ago are in the export folder, not a card. */
-const recent = (job: ExportJob, now: number) => jobIsActive(job)
-  || (job.finishedAt != null && now - job.finishedAt < (job.status === 'failed' ? FAILED_KEPT_MS : DONE_KEPT_MS));
 
 /**
  * `onError`: a finished export that could not be opened or shown (its file moved or deleted since), in a sentence.
@@ -48,7 +57,7 @@ export const ExportTray = React.forwardRef<ExportTrayHandle, { projectId: string
   const fileAction = (run: Promise<void>) => { void run.catch(() => onError?.(t('exportTray.fileGone'))); };
   const [jobs, setJobs] = React.useState<ExportJob[]>([]);
   const [collapsed, setCollapsed] = React.useState(false);
-  const [dismissed, setDismissed] = React.useState<Set<string>>(() => new Set());
+  const [dismissed, setDismissed] = React.useState<Set<string>>(() => closedOf(projectId));
   /* Cancel was pressed: said at once, before the server's word that it is stopping arrives */
   const [cancelAsked, setCancelAsked] = React.useState<Set<string>>(() => new Set());
   const cancelling = (job: ExportJob) => jobIsActive(job) && (job.cancelling || cancelAsked.has(job.id));
@@ -83,15 +92,14 @@ export const ExportTray = React.forwardRef<ExportTrayHandle, { projectId: string
   /* when the project opens: exports still running from before are still shown; then every change as it happens */
   React.useEffect(() => {
     setJobs([]);
-    setDismissed(new Set());
+    setDismissed(closedOf(projectId));
     setCancelAsked(new Set());
     let live = true;
     void listExports(projectId).then((r) => {
       if (!live) return;
-      const now = Date.now();
       setJobs((prev) => {
         const known = new Set(prev.map((j) => j.id));
-        return [...prev, ...r.exports.filter((j) => !known.has(j.id) && recent(j, now))];
+        return [...prev, ...r.exports.filter((j) => !known.has(j.id))];
       });
     }).catch(() => {});
     const stop = projectEvents(projectId, (event) => {
@@ -124,18 +132,6 @@ export const ExportTray = React.forwardRef<ExportTrayHandle, { projectId: string
   }, [projectId, t]);
 
   const visible = jobs.filter((j) => !dismissed.has(j.id));
-  /* All done and none failed: the card goes by itself after a moment (not while the pointer is on it). A failure
-     stays until it is closed: that one needs reading. */
-  const [hovered, setHovered] = React.useState(false);
-  const settled = visible.length > 0 && !visible.some(jobIsActive) && !visible.some((j) => j.status === 'failed');
-  /* the cards shown, as a string: `visible` is a new array on every render (many a second while the film plays),
-     which would start the timer over each time */
-  const shownIds = visible.map((j) => j.id).join('\n');
-  React.useEffect(() => {
-    if (!settled || hovered) return undefined;
-    const timer = window.setTimeout(() => setDismissed((d) => new Set([...d, ...shownIds.split('\n')])), AUTO_HIDE_MS);
-    return () => window.clearTimeout(timer);
-  }, [settled, hovered, shownIds]);
   if (!visible.length) return null;
 
   const active = visible.filter(jobIsActive);
@@ -144,8 +140,6 @@ export const ExportTray = React.forwardRef<ExportTrayHandle, { projectId: string
 
   return (
     <div
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
       style={{ right: 16 + inset }}
       className="pointer-events-auto fixed bottom-4 z-[120] w-[340px] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-lg)]"
     >
@@ -170,7 +164,7 @@ export const ExportTray = React.forwardRef<ExportTrayHandle, { projectId: string
         {!active.length && (
           <button
             type="button"
-            onClick={() => setDismissed(new Set(jobs.map((j) => j.id)))}
+            onClick={() => { const closed = new Set(jobs.map((j) => j.id)); keepClosed(projectId, closed); setDismissed(closed); }}
             aria-label={t('exportTray.close')}
             className="rounded-md p-1 text-[var(--text-faint)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
           >
@@ -273,7 +267,7 @@ function JobLine({ job, cancelling, t }: { job: ExportJob; cancelling: boolean; 
     return <p className="mt-0.5 text-[11.5px] text-[var(--text-faint)]">{t('exportTray.cancelled')}</p>;
   }
   /* a long failure is cut to three lines: a click (or the pointer resting on it) shows all of it */
-  const error = job.error || t('exportTray.failed');
+  const error = job.diskFull ? t('exportTray.diskFull') : job.error || t('exportTray.failed');
   return (
     <p
       role="button"

@@ -355,6 +355,29 @@ export function placedStrokeCss(s: PlacedStroke | null, was?: PlacedStroke | nul
   };
 }
 
+/* ───────────── text color: `color`, or the page's own text fill over it ───────────── */
+
+/**
+ * What words are drawn in when their page gives them a fill of its own: `-webkit-text-fill-color` paints the glyphs
+ * over `color` (gold or gradient words often have one).
+ */
+export const TEXT_FILL = '-webkit-text-fill-color';
+
+const ownFill = (fill: string | undefined) => fill != null && fill !== '' && !/^currentcolor$/i.test(fill.trim());
+/** A fill no one sees: words showing what is behind them (a gradient clipped to the text). */
+const seeThrough = (fill: string) => /^transparent$/i.test(fill.trim()) || /^#[0-9a-f]{6}00$/i.test(fill.trim());
+
+/** The color words are drawn in: their own fill when it shows, else `color`. */
+export function textColorOf(read: (prop: string) => string | undefined): string | undefined {
+  const fill = read(TEXT_FILL);
+  return ownFill(fill) && !seeThrough(fill!) ? fill : read('color');
+}
+
+/** Words drawn in `color`: with the page's own fill taken over by it (`currentcolor`), or the new color would not show. */
+export function textColorCss(read: (prop: string) => string | undefined, color: string): Record<string, string> {
+  return ownFill(read(TEXT_FILL)) ? { color, [TEXT_FILL]: 'currentcolor' } : { color };
+}
+
 /* ───────────── inner shadow: an inset box-shadow ───────────── */
 
 /** A shadow cast inside the box, over its fill (an inner shadow). */

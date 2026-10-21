@@ -57,13 +57,32 @@ function factsOf(src) {
       m.preload = 'metadata'; m.muted = true;
       const done = (facts) => { m.removeAttribute('src'); m.load(); ok(facts); };
       m.onloadedmetadata = () => done({ duration: m.duration, w: m.videoWidth, h: m.videoHeight });
-      m.onerror = () => done(null);
+      /* a file the browser cannot read (ProRes footage, a codec it has no decoder for): what the host says it is */
+      m.onerror = () => { void hostFacts(href).then(done); };
       const facts = new URL(href);
       facts.searchParams.set('film-facts', '1');
       m.src = facts.href;
     })));
   }
   return factsBySrc.get(href);
+}
+
+/**
+ * What the host says a file is, when the browser cannot read it: ffprobe's length and picture size, asked beside the
+ * film (`__film/media-facts`, the file named from the film's folder, see host.mjs); null when it does not say.
+ * @param {string} href
+ */
+function hostFacts(href) {
+  const src = new URL(href);
+  if (src.origin !== location.origin) return Promise.resolve(null);
+  /* the file from the film's folder, `../` and all (an edit kept apart from its project names its files so) */
+  const here = new URL('.', location.href).pathname.split('/').slice(0, -1);
+  const there = src.pathname.split('/');
+  let same = 0;
+  while (same < here.length && same < there.length - 1 && here[same] === there[same]) same++;
+  const of = [...here.slice(same).map(() => '..'), ...there.slice(same)].join('/');
+  return fetch(new URL(`__film/media-facts?of=${encodeURIComponent(of)}`, location.href))
+    .then((r) => (r.ok ? r.json() : null)).then((f) => (f?.duration > 0 ? { duration: f.duration, w: f.w ?? 0, h: f.h ?? 0 } : null)).catch(() => null);
 }
 
 /**
@@ -253,7 +272,8 @@ function step(c, want) {
 /**
  * A video on screen while a person looks at one moment or scrubs: sought, and waited for until its frame is decoded
  * (not until the compositor shows it: a seek within the frame on screen shows nothing new, and that wait would only
- * run out). The editor asks for the next moment once this one is drawn, so a scrub goes as fast as the decoder.
+ * run out). The editor asks for the next moment once this one is drawn, so a scrub goes as fast as the decoder; the
+ * frame on screen is then made sure of while the person stays there (onScreen).
  */
 async function glance(c, want) {
   const v = c.el;
@@ -269,14 +289,58 @@ async function glance(c, want) {
     if (c.lastWant !== want || !c.awake) return;
     justLoaded = true;
   }
+  follow(c);
   if (!justLoaded && !v.seeking && Math.abs(v.currentTime - want) < SAME_TIME && v.readyState >= 2) return;
   v.currentTime = want;
-  await new Promise((done) => {
-    if (!v.seeking && v.readyState >= 2) { done(); return; }
-    v.addEventListener('seeked', done, { once: true });
-    v.addEventListener('loadeddata', done, { once: true });
-    setTimeout(done, 3000);
-  });
+  await sought(v);
+  void onScreen(c, want);
+}
+
+/** A seek done: its frame decoded (`seeked`, or the file's first data), or after a time limit. */
+const sought = (v) => new Promise((done) => {
+  if (!v.seeking && v.readyState >= 2) { done(undefined); return; }
+  v.addEventListener('seeked', done, { once: true });
+  v.addEventListener('loadeddata', done, { once: true });
+  setTimeout(done, 3000);
+});
+
+/** Follow the frames a clip's video puts on screen (its frame callback): `c.presented`, the last one's time. */
+function follow(c) {
+  const v = c.el;
+  if (c.following || typeof v.requestVideoFrameCallback !== 'function') return;
+  c.following = true;
+  const note = (/** @type {number} */ _now, /** @type {{ mediaTime: number }} */ meta) => {
+    c.presented = meta.mediaTime;
+    c.onPresented?.();
+    v.requestVideoFrameCallback(note);
+  };
+  v.requestVideoFrameCallback(note);
+}
+
+/**
+ * A still moment's frame made sure of on screen while the person stays there: a frame decoded may never be presented
+ * (Chromium, see showVideoAt), and the picture keeps an older one, frames behind what an export draws at the same t.
+ * Not on screen in a moment, it is sought again, half a millisecond on (the same frame), a few times. A scrub that
+ * asks for another moment, or the film playing, leaves it; so does a video whose frames' length the host cannot say.
+ */
+async function onScreen(c, want) {
+  const v = c.el;
+  const frame = await frameOf(c);
+  if (!frame || !c.following) return;
+  /* the frame a seek to want lands in, as showVideoAt tells it */
+  const right = () => c.presented != null && c.presented <= want + 0.002 && want + 0.001 - c.presented < frame * 1.25;
+  const still = () => c.lastWant === want && v.paused && !v.seeking;
+  for (let tries = 1; ; tries++) {
+    if (right() || !still()) return;
+    const shown = await new Promise((done) => {
+      const timer = setTimeout(() => done(false), PRESENT_MS);
+      c.onPresented = () => { if (right()) { clearTimeout(timer); done(true); } };
+    });
+    c.onPresented = undefined;
+    if (shown || tries >= SEEK_TRIES || !still()) return;
+    v.currentTime = want + tries * 0.0005;
+    await sought(v);
+  }
 }
 /**
  * A video whose clip starts `lead` film seconds from now, the film playing at `rate`: sought ahead (to PREROLL before

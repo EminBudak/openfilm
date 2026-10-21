@@ -96,6 +96,12 @@ test('the drafts folders: 剪映\'s and CapCut\'s, on a Mac and on Windows, when
   const win = join('D:\\local-app-data', 'JianyingPro', 'User Data', 'Projects', 'com.lveditor.draft');
   assert.equal(draftsRoot('jianying', { platform: 'win32', home: 'D:\\win-home', localAppData: 'D:\\local-app-data', exists: (p) => p === win }), win);
   assert.equal(draftsRoot('jianying', { platform: 'linux', home: '/linux-home', exists: () => true }), null);
+  /* moved in the app's Settings › Drafts location: that folder, the default one no longer looked in */
+  const settings = join('/mac-home', 'Movies', 'JianyingPro', 'User Data', 'Config', 'globalSetting');
+  const read = (p) => { if (p !== settings) throw new Error('ENOENT'); return 'currentCachePath=/x\r\ncurrentCustomDraftPath=/Volumes/Work/剪映草稿\r\nother=1\r\n'; };
+  assert.equal(draftsRoot('jianying', { platform: 'darwin', home: '/mac-home', read, exists: (p) => p === '/Volumes/Work/剪映草稿' || p === mac('JianyingPro') }), '/Volumes/Work/剪映草稿');
+  /* a folder it names that is gone (a drive not plugged in): the default one, if it is there */
+  assert.equal(draftsRoot('jianying', { platform: 'darwin', home: '/mac-home', read, exists: (p) => p === mac('JianyingPro') }), mac('JianyingPro'));
 });
 
 test('a draft says which app wrote it: 剪映 or CapCut', () => {
@@ -116,7 +122,7 @@ test('each file is in the draft\'s media library, once, and each material names 
     assert.ok(entry, `${m.path} is in the library`);
     assert.equal(entry.file_Path, m.path);
   }
-  const kinds = Object.fromEntries(library.map((e) => [e.file_Path.split('/').pop(), e.metetype]));
+  const kinds = Object.fromEntries(library.map((e) => [e.file_Path.split(/[\\/]/).pop(), e.metetype]));
   assert.equal(kinds['bed fade.wav'], 'music', 'the bed, its fade its own part');
   assert.equal(kinds['b.png'], 'photo');
   assert.equal(Object.values(kinds).filter((k) => k === 'video').length, 2, 'the page rendered and the footage');

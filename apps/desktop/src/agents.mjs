@@ -1,7 +1,7 @@
 /**
  * The chat's agents: the person's own Claude Code, Codex, GitHub Copilot, Cursor, OpenCode, CodeBuddy, Qwen Code,
- * Kimi or MiniMax Code, driven over the Agent Client Protocol (ACP): a child process speaking JSON-RPC over
- * stdin/stdout.
+ * Kimi, MiniMax Code or DeepSeek Harness, driven over the Agent Client Protocol (ACP): a child process speaking
+ * JSON-RPC over stdin/stdout.
  * The app is the client: initialize, session/new (or session/resume for a conversation from before), session/prompt;
  * session/update draws the chat, and session/request_permission asks the person in the chat.
  *
@@ -85,6 +85,9 @@ export const AGENTS = Object.freeze({
   qwen: { label: AGENT_DEFINITIONS.qwen.name, args: ['--acp', '--approval-mode', 'yolo'], login: [], approve: true },
   kimi: { label: AGENT_DEFINITIONS.kimi.name, args: ['acp'], login: ['login'], approve: true },
   minimax: { label: AGENT_DEFINITIONS.minimax.name, args: ['acp'], login: ['login'], approve: true },
+  /* DeepSeek Harness (`dsh`) speaks ACP as its `acp` profile. It has no sign-in command: the person signs in to their
+     DeepSeek account in its desktop app, or sets DEEPSEEK_API_KEY, so one found is connected */
+  deepseek: { label: AGENT_DEFINITIONS.deepseek.name, args: ['--profile', 'acp'], login: null, approve: true },
 });
 
 export const isAgentId = (id) => typeof id === 'string' && Object.hasOwn(AGENTS, id);
@@ -939,13 +942,18 @@ export function legacyOptions(session) {
 /**
  * Config options with each choice once: an agent may list the same value twice (GitHub Copilot's model list has
  * "Auto" twice), which the menu would show twice, both ticked. The first of each is kept; anything else as it was.
+ * Choices in groups (DeepSeek Harness groups its models by where they run: its API, the person's DeepSeek account)
+ * are listed one after another, each named with its group's name.
  */
 export function distinctOptions(configOptions) {
   if (!Array.isArray(configOptions)) return configOptions;
   return configOptions.map((o) => {
     if (!Array.isArray(o?.options)) return o;
     const seen = new Set();
-    return { ...o, options: o.options.filter((c) => !c || !('value' in c) || (!seen.has(c.value) && seen.add(c.value))) };
+    const choices = o.options.flatMap((c) => (Array.isArray(c?.options) && !('value' in c)
+      ? c.options.map((g) => (g && typeof c.name === 'string' && c.name ? { ...g, name: `${c.name} · ${g.name}` } : g))
+      : [c]));
+    return { ...o, options: choices.filter((c) => !c || !('value' in c) || (!seen.has(c.value) && seen.add(c.value))) };
   });
 }
 

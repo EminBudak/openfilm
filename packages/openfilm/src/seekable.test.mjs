@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -104,6 +104,55 @@ test('a copy once made is found for each request after it, and none before', ffm
     assert.ok(copies.get(file));
     assert.equal(madeCopy(file, dir), copies.get(file), 'at once, though a miss was just remembered');
     assert.equal(madeCopy(join(dir, 'gone.mov'), dir), null);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('renders asking for the same copy at once share one, whole; one cancelled leaves it to the other', ffmpeg, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'of-seekable-shared-'));
+  try {
+    const file = join(dir, 'prores.mov');
+    execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=1920x1080:rate=30', '-t', '8', '-c:v', 'prores_ks', '-profile:v', '3', file]);
+    const ask = { plays: async () => false, slow: false };
+    const seek = join(dir, '.film', 'cache', 'seek');
+    /* the first starts the copy; the second asks a moment later and waits on it; the first is cancelled partway: the
+       second makes the copy itself */
+    const quit = new AbortController();
+    const first = seekableCopies([file], dir, { ...ask, signal: quit.signal });
+    const later = { plays: () => new Promise((r) => setTimeout(() => r(false), 100)), slow: false };
+    const second = seekableCopies([file], dir, later);
+    setTimeout(() => quit.abort(), 400);
+    const [a, b] = await Promise.all([first, second]);
+    assert.equal(a.size, 0, 'the cancelled one has none');
+    const copy = /** @type {string} */ (b.get(file));
+    assert.ok(copy);
+    assert.equal(times(copy).length, 240, 'every frame');
+    assert.deepEqual(readdirSync(seek), [copy.split(/[\\/]/).pop()], 'the copy alone: no part left');
+    rmSync(seek, { recursive: true, force: true });
+    const both = await Promise.all([seekableCopies([file], dir, ask), seekableCopies([file], dir, ask)]);
+    assert.equal(both[0].get(file), both[1].get(file));
+    assert.equal(times(/** @type {string} */ (both[0].get(file))).length, 240);
+    assert.equal(readdirSync(seek).length, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('two processes making the same copy at once never write the same file', ffmpeg, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'of-seekable-two-'));
+  try {
+    const file = join(dir, 'prores.mov');
+    execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=30', '-t', '3', '-c:v', 'prores_ks', '-profile:v', '3', file]);
+    const code = `const { seekableCopies } = await import(${JSON.stringify(new URL('./seekable.mjs', import.meta.url).href)});
+const copies = await seekableCopies([${JSON.stringify(file)}], ${JSON.stringify(dir)}, { plays: async () => false, slow: false });
+console.log(copies.get(${JSON.stringify(file)}) ?? '');`;
+    const run = () => new Promise((done, fail) => execFile(process.execPath, ['--input-type=module', '-e', code], (e, out) => (e ? fail(e) : done(String(out).trim()))));
+    const [a, b] = await Promise.all([run(), run()]);
+    assert.ok(a);
+    assert.equal(a, b);
+    assert.equal(times(a).length, 90, 'whole');
+    assert.equal(readdirSync(join(dir, '.film', 'cache', 'seek')).length, 1, 'no part left');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

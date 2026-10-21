@@ -16,6 +16,7 @@ import { ChevronRight } from 'lucide-react';
 import { useT } from '@/i18n';
 import { applyFieldInput, parseFieldInput, type FieldContext } from '@/lib/field-input';
 import { scrubFromDrag } from '@/lib/inspect-scrub';
+import { MIXED, type Mixed } from '@/lib/mixed';
 import { metricCss, parseMetric, showMetric, stepMetric, type Metric, type MetricKind } from '@/lib/type-metrics';
 import { Tooltip } from './Tooltip';
 import { Popover } from './Popover';
@@ -32,9 +33,7 @@ const PREFIX = 'flex h-[26px] w-[22px] shrink-0 select-none items-center justify
 export const HEAD_BTN = 'flex h-6 w-6 shrink-0 items-center justify-center rounded-[5px] text-[var(--text-muted)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text)] disabled:pointer-events-none disabled:opacity-40';
 export const ICON = 13;
 
-/** Several things selected that differ in a value. */
-export const MIXED: unique symbol = Symbol('mixed');
-export type Mixed = typeof MIXED;
+export { MIXED, type Mixed };
 
 /** Turns a thing's own value into its new one (one value typed for all, or a change of each). */
 export type FieldApply = (base: number) => number;
@@ -509,7 +508,7 @@ export function MetricField({
  * double-click puts it back to neutral. The number beside it takes everything a number field takes.
  */
 export function SliderField({
-  label, value, min, max, neutral = min, step = 1, unit, fieldMin, fieldMax, onPreview, onCommit, onRevert, disabled, placeholder,
+  label, value, min, max, neutral = min, step = 1, unit, fieldMin, fieldMax, fieldWidth = 56, onPreview, onCommit, onRevert, disabled, placeholder,
 }: {
   label: string;
   value: number | undefined | Mixed;
@@ -522,6 +521,8 @@ export function SliderField({
   unit?: string;
   fieldMin?: number;
   fieldMax?: number;
+  /** The number's width in px, for values longer than a percentage (`-14.4 dB`). */
+  fieldWidth?: number;
   onPreview?: (n: number, apply: FieldApply) => void;
   onCommit: (n: number, apply: FieldApply) => void;
   onRevert?: () => void;
@@ -545,7 +546,7 @@ export function SliderField({
   const to = Math.max(pct(neutral), pct(shown));
   const centred = neutral > min && neutral < max;
   return (
-    <div className={`grid grid-cols-[64px_minmax(0,1fr)_56px] items-center gap-2 ${disabled ? 'opacity-50' : ''}`}>
+    <div className={`grid items-center gap-2 ${disabled ? 'opacity-50' : ''}`} style={{ gridTemplateColumns: `64px minmax(0,1fr) ${fieldWidth}px` }}>
       <span className="truncate text-[11px] text-[var(--text-muted)]" title={label}>{label}</span>
       <div className="relative flex h-[26px] items-center">
         <div className="pointer-events-none absolute inset-x-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full bg-[var(--border-strong)]">

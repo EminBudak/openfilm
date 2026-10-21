@@ -10,7 +10,8 @@
  *     number for the cut, so there is never a one-frame gap.
  *   · Tracks reversed: film.html's first track is on top; xmeml's V1 is at the bottom. Clips overlapping on one track
  *     are spread over several (an editor's track shows one clip a frame).
- *   · A web page (a motion graphic) is always rendered: a full-frame ProRes 4444 with alpha, its placement in the
+ *   · A web page (a motion graphic) is always rendered: a full-frame MOV with alpha (`alpha`: ProRes 4444 or PNG;
+ *     footage with alpha that has to be converted is written the same way), its placement in the
  *     picture. Footage and stills come as they are, placed with Basic Motion (uniform scale and a move); what Basic
  *     Motion can't say (a rotation, a speed change, an unknown size) is rendered too: rather less to adjust than a
  *     picture in the wrong place.
@@ -22,6 +23,7 @@
  *     from the file's start, which is the clip's, so editors that count keyframes from either agree).
  */
 import { spawn } from 'node:child_process';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { clipKind, pictureRect, soundRole } from '../../src/film-doc.mjs';
 import { exactRate } from '../../src/rate.mjs';
@@ -43,13 +45,14 @@ import { exactRate } from '../../src/rate.mjs';
  *   the sound of; `fade`: its fades in and out, film seconds (fitted to its length)
  * @typedef {{ stage: { w: number, h: number }, duration: number, pictures: NlePicture[], sounds: NleSound[] }} NleFilm
  * @typedef {{ title: string, fps: number, audio: 'clips' | 'stems', media: 'copy' | 'link', mediaDir: string,
- *   stems?: SoundRole[], audioTracks?: 'roles' | 'source' }} NlePlanOptions
+ *   stems?: SoundRole[], audioTracks?: 'roles' | 'source', alpha?: NleAlpha }} NlePlanOptions
+ * @typedef {'png' | 'prores4444'} NleAlpha How a picture with alpha is written, in a MOV (default ProRes 4444)
  * @typedef {{ timebase: number, ntsc: boolean, fps: number }} NleRate
  * @typedef {{ kind: 'render', clip: string, frames: number }
  *   | { kind: 'copy', from: string }
  *   | { kind: 'link', from: string }
  *   | { kind: 'raster', from: string, src: string, w: number, h: number }
- *   | { kind: 'transcode', from: string, to: 'prores422hq' | 'prores4444' | 'wav', segment?: { from: number, to: number, speed: number, seconds: number } }
+ *   | { kind: 'transcode', from: string, to: 'prores422hq' | NleAlpha | 'wav', segment?: { from: number, to: number, speed: number, seconds: number } }
  *   | { kind: 'stem', role: SoundRole }} NleMediaJob
  *   How a file is made: a clip rendered, a source cloned or pointed at, a still drawn to PNG, a source converted
  *   (`segment`: only those source seconds, at that speed, `seconds` long), a mixed stem
@@ -183,7 +186,8 @@ export function planNleTimeline(film, opts) {
     let name = `${safeStem(stem)}.${ext}`;
     for (let n = 2; names.has(name.toLowerCase()); n++) name = `${safeStem(stem)} (${n}).${ext}`;
     names.add(name.toLowerCase());
-    return { name, path: `${opts.mediaDir.replace(/\/$/, '')}/${name}` };
+    /* the system's own separators: a draft on Windows names its files with backslashes, as 剪映 does */
+    return { name, path: join(opts.mediaDir, name) };
   };
   const addFile = (/** @type {Omit<NleFile, 'id'>} */ f) => { const file = { id: `file-${++fileSeq}`, ...f }; files.push(file); return file; };
   const clipId = () => `clipitem-${++clipSeq}`;
@@ -217,7 +221,7 @@ export function planNleTimeline(film, opts) {
       const video = want === 'video' ? facts.hasVideo !== false : facts.hasVideo === true;
       const audio = facts.hasAudio ? { channels: facts.channels ?? 2, sampleRate: facts.sampleRate ?? 48_000 } : undefined;
       let made;
-      if (video && VIDEO_CONVERT.has(ext)) made = { ...mediaPath(stem, 'mov'), job: /** @type {NleMediaJob} */ ({ kind: 'transcode', from: s.path, to: facts.alpha ? 'prores4444' : 'prores422hq' }) };
+      if (video && VIDEO_CONVERT.has(ext)) made = { ...mediaPath(stem, 'mov'), job: /** @type {NleMediaJob} */ ({ kind: 'transcode', from: s.path, to: facts.alpha ? opts.alpha ?? 'prores4444' : 'prores422hq' }) };
       else if (!video && !AUDIO_COPY.has(ext)) made = { ...mediaPath(stem, 'wav'), job: /** @type {NleMediaJob} */ ({ kind: 'transcode', from: s.path, to: 'wav' }) };
       else made = original();
       const converted = made.job.kind === 'transcode';

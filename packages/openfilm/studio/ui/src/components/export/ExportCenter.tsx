@@ -11,7 +11,7 @@
  * What was chosen last time for each destination is kept in this browser (localStorage) and comes back next time.
  */
 import {
-  AlertTriangle, AudioLines, Captions, Check, Clapperboard, Download, Film, FolderArchive, FolderOpen, Images, Layers, Loader2, MonitorPlay, Presentation,
+  AlertTriangle, AudioLines, Captions, Check, ChevronDown, Clapperboard, Download, Film, FolderArchive, FolderOpen, Images, Layers, Loader2, MonitorPlay, Presentation,
   Sparkles, X,
 } from 'lucide-react';
 import React from 'react';
@@ -50,6 +50,7 @@ import {
   type ExportCapabilities,
   type ExportJob,
   type ExportRequest,
+  type NleAlpha,
   type ProjectPart,
   type ProjectSizes,
 } from '@/lib/export-jobs';
@@ -112,7 +113,9 @@ interface Settings {
   /** For an editing program: the sound as clips or as mixed stems. */
   /** the app it is for: `draft` 剪映 (in Chinese) or CapCut (elsewhere), the same draft; `auto`: the draft when that app
       is on this computer, else Premiere Pro */
-  nle: { app: 'auto' | 'draft' | keyof typeof NLE_APPS; fps: number | 'source'; audio: 'clips' | 'stems'; subtitles: boolean };
+  nle: { app: 'auto' | 'draft' | keyof typeof NLE_APPS; fps: number | 'source'; audio: 'clips' | 'stems'; subtitles: boolean;
+    /** How the pages are written: for a draft, and for Premiere Pro or DaVinci Resolve (Final Cut Pro takes ProRes). */
+    alphaDraft: NleAlpha; alphaXml: NleAlpha };
   subtitles: { format: 'srt' | 'vtt' | 'txt' };
   images: { format: 'png' | 'jpg'; shortEdge: number; frame: FrameChoice; fill: FilmFrameFill; burn: boolean };
   slides: { format: 'pptx' | 'pdf'; shortEdge: number; frame: FrameChoice; fill: FilmFrameFill; burn: boolean };
@@ -133,7 +136,7 @@ const DEFAULTS: Settings = {
   gif: { width: 640, fps: 15, frame: 'current', fill: 'contain', burn: true },
   alpha: { codec: 'prores4444', source: WHOLE_FILM, shortEdge: 1080, scale: 1, fps: 30, audio: true },
   audio: { format: 'wav', mix: true, stems: false },
-  nle: { app: 'auto', fps: 'source', audio: 'clips', subtitles: true },
+  nle: { app: 'auto', fps: 'source', audio: 'clips', subtitles: true, alphaDraft: 'auto', alphaXml: 'prores4444' },
   subtitles: { format: 'srt' },
   images: { format: 'png', shortEdge: 1080, frame: 'current', fill: 'contain', burn: false },
   slides: { format: 'pptx', shortEdge: 1080, frame: 'current', fill: 'contain', burn: false },
@@ -187,6 +190,9 @@ const ALPHA_SCALES = [0.5, 1, 2];
 const PRESET_GROUPS: ExportPresetGroup[] = ['landscape', 'vertical', 'feed'];
 /** The rates editors take; a source at another NTSC rate (23.976, 59.94) comes as the "source" choice. */
 const NLE_FPS = [23.976, 24, 25, 29.97, 30, 50, 59.94, 60];
+/** How a draft and an XML write their pages (exports.mjs), the default first. */
+const NLE_ALPHA: Record<'draft' | 'xml', readonly NleAlpha[]> = { draft: ['auto', 'png', 'prores'], xml: ['prores4444', 'png'] };
+const NLE_ALPHA_NAME: Record<Exclude<NleAlpha, 'auto'>, string> = { png: 'PNG', prores: 'ProRes', prores4444: 'ProRes 4444' };
 const VIDEO_SRC = /\.(mp4|m4v|mov|webm|mkv|avi|ogv)$/i;
 
 /** Whether this machine's ffmpeg makes a codec (unknown until the server answers: assumed yes). */
@@ -379,6 +385,11 @@ export function ExportCenter(props: ExportCenterProps) {
   const nleApp = s.nle.app === 'auto' ? (draftHere ? 'draft' : 'premiere') : s.nle.app;
   /* a draft goes into its app's drafts folder, whatever folder is picked */
   const toDrafts = dest === 'nle' && nleApp === 'draft' && draftHere;
+  /* Final Cut Pro takes ProRes only: no choice */
+  const nleAlphaKind = nleApp === 'draft' ? 'draft' : nleApp === 'finalcut' ? null : 'xml';
+  const nleAlphaPicked = nleAlphaKind === 'draft' ? s.nle.alphaDraft : s.nle.alphaXml;
+  const nleAlpha: NleAlpha = !nleAlphaKind ? 'prores4444'
+    : NLE_ALPHA[nleAlphaKind].includes(nleAlphaPicked) && (!nleAlphaPicked.startsWith('prores') || codecAvailable('prores4444', can)) ? nleAlphaPicked : NLE_ALPHA[nleAlphaKind][0];
   const codecName = (c: ExportVideoCodec) => CODEC_LABEL[c] + (c === 'png' ? ` ${t('exportCenter.sequence')}` : '');
 
   /* the parts of the project asked that it has (a part it has none of is left out) */
@@ -421,7 +432,7 @@ export function ExportCenter(props: ExportCenterProps) {
       }
       case 'nle':
         return [{
-          kind: 'nle', format: nleApp === 'draft' ? draftApp : NLE_APPS[nleApp].format, fps: s.nle.fps === 'source' ? (nleSourceFps ?? projectFps) : s.nle.fps, audio: s.nle.audio, media: 'copy',
+          kind: 'nle', format: nleApp === 'draft' ? draftApp : NLE_APPS[nleApp].format, fps: s.nle.fps === 'source' ? (nleSourceFps ?? projectFps) : s.nle.fps, audio: s.nle.audio, media: 'copy', alpha: nleAlpha,
           subtitles: s.nle.subtitles, label: nleApp === 'draft' ? tApp('exportCenter.nleDraftTitle') : `${NLE_APPS[nleApp].name} XML`,
         }];
       case 'subtitles':
@@ -443,7 +454,7 @@ export function ExportCenter(props: ExportCenterProps) {
         }];
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dest, s, can, presets, nleApp, draftApp, rangeSec?.[0], rangeSec?.[1], props.frame, blocks, nleSourceFps, captions, projectParts]);
+  }, [dest, s, can, presets, nleApp, nleAlpha, draftApp, rangeSec?.[0], rangeSec?.[1], props.frame, blocks, nleSourceFps, captions, projectParts]);
 
   /* a range, not a size: what is in the picture decides a video's or a GIF's size (export-spec.ts); sound is exact */
   const estBytes = React.useMemo(() => requests.reduce<[number, number]>(([low, high], r) => {
@@ -864,6 +875,25 @@ export function ExportCenter(props: ExportCenterProps) {
                       onChange={(app) => patch('nle', { app })}
                     />
                   </Field>
+                  {nleAlphaKind && (
+                    <Field label={t('exportCenter.nleAlpha')}>
+                      <div className="grid grid-cols-2 gap-2">
+                        {NLE_ALPHA[nleAlphaKind].map((c) => {
+                          const unavailable = c.startsWith('prores') && !codecAvailable('prores4444', can);
+                          return (
+                            <OptionCard
+                              key={c}
+                              on={nleAlpha === c}
+                              disabled={unavailable}
+                              title={c === 'auto' ? t('exportCenter.nleAlphaAuto') : NLE_ALPHA_NAME[c]}
+                              desc={unavailable ? t('exportCenter.notOnThisComputer') : t(`exportCenter.nleAlphaHint.${c}`)}
+                              onClick={() => patch('nle', nleAlphaKind === 'draft' ? { alphaDraft: c } : { alphaXml: c })}
+                            />
+                          );
+                        })}
+                      </div>
+                    </Field>
+                  )}
                   <Field label={t('exportCenter.fps')}>
                     <FpsSelect
                       label={t('exportCenter.fps')}
@@ -1132,72 +1162,61 @@ export function ExportCenter(props: ExportCenterProps) {
             </div>
           </div>
 
-          {/* bottom: where it goes (the folder, a click changes it), what comes out, and the primary button */}
-          <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-3 border-t border-[var(--border-soft)] bg-[color-mix(in_srgb,var(--surface-2)_45%,transparent)] px-5 py-3.5">
-            {toDrafts ? (
-              <div className="-ml-2 flex min-w-0 max-w-[340px] flex-1 items-center gap-2.5 px-2 py-1.5">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--surface-2)] text-[var(--text-muted)] ring-1 ring-[var(--border)]">
-                  <Clapperboard size={15} />
+          {/* bottom: where it goes (a button like the dialog's other pickers: a click picks another folder), what it is
+              called, what comes out, and the primary button */}
+          <div className="flex shrink-0 flex-wrap items-center gap-x-5 gap-y-3 border-t border-[var(--border-soft)] bg-[color-mix(in_srgb,var(--surface-2)_45%,transparent)] px-5 py-3.5">
+            <div className="flex min-w-[280px] max-w-[560px] flex-1 items-center gap-2">
+              {toDrafts ? (
+                <span className="flex h-10 min-w-0 items-center gap-2 rounded-lg border border-[var(--border)] px-3 text-[13px] text-[var(--text-muted)]">
+                  <Clapperboard size={15} className="shrink-0" />
+                  <span className="truncate">{tApp('exportCenter.nleDraftTitle')}</span>
                 </span>
-                <span className="flex min-w-0 items-baseline gap-1.5">
-                  <span className="shrink-0 text-[11px] text-[var(--text-faint)]">{t('exportCenter.saveTo')}</span>
-                  <span className="truncate text-[13px] font-medium text-[var(--text)]">{tApp('exportCenter.nleDraftTitle')}</span>
-                </span>
-              </div>
-            ) : folderDraft != null ? (
-              <input
-                autoFocus
-                value={folderDraft}
-                spellCheck={false}
-                aria-label={t('exportCenter.saveTo')}
-                onChange={(e) => setFolderDraft(e.target.value)}
-                onFocus={(e) => e.currentTarget.select()}
-                onBlur={commitFolder}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') { e.preventDefault(); commitFolder(); }
-                  if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setFolderDraft(null); }
-                }}
-                className="h-10 min-w-[200px] flex-1 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 font-mono text-[12px] text-[var(--text)] outline-none focus:border-[var(--text-faint)]"
-              />
-            ) : (
-              <button
-                type="button"
-                onClick={() => void changeFolder()}
-                disabled={picking}
-                title={folder}
-                aria-label={`${t('exportCenter.saveTo')}: ${folder || '—'}. ${t('exportCenter.change')}`}
-                className="group -ml-2 flex min-w-0 max-w-[340px] flex-1 items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition hover:bg-[var(--bg-hover)] disabled:opacity-60"
-              >
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--surface-2)] text-[var(--text-muted)] ring-1 ring-[var(--border)] transition group-hover:text-[var(--text)]">
-                  {picking ? <Loader2 size={15} className="animate-spin" /> : <FolderOpen size={15} />}
-                </span>
-                <span className="flex min-w-0 flex-col">
-                  <span className="flex min-w-0 items-baseline gap-1.5">
-                    <span className="shrink-0 text-[11px] text-[var(--text-faint)]">{t('exportCenter.saveTo')}</span>
-                    <span className="truncate text-[13px] font-medium text-[var(--text)]">{folderName(folder) || '—'}</span>
-                  </span>
-                  <span className="truncate text-[11px] text-[var(--text-faint)] group-hover:text-[var(--text-muted)]">{t('exportCenter.change')}</span>
-                </span>
-              </button>
-            )}
-            {/* what the files are called: the project's own name unless typed over (a draft is named by its app) */}
-            {!toDrafts && (
-              <label className="flex min-w-0 items-center gap-2">
-                <span className="shrink-0 text-[11px] text-[var(--text-faint)]">{t('exportCenter.fileName')}</span>
+              ) : folderDraft != null ? (
+                <input
+                  autoFocus
+                  value={folderDraft}
+                  spellCheck={false}
+                  aria-label={t('exportCenter.saveTo')}
+                  onChange={(e) => setFolderDraft(e.target.value)}
+                  onFocus={(e) => e.currentTarget.select()}
+                  onBlur={commitFolder}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); commitFolder(); }
+                    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setFolderDraft(null); }
+                  }}
+                  className="h-10 min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 font-mono text-[12px] text-[var(--text)] outline-none focus:border-[var(--text-faint)]"
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void changeFolder()}
+                  disabled={picking}
+                  title={folder}
+                  aria-label={`${t('exportCenter.saveTo')}: ${folder || '—'}. ${t('exportCenter.change')}`}
+                  className="flex h-10 min-w-0 max-w-[45%] shrink-0 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--fill-tsp)] pl-3 pr-2.5 text-[13px] text-[var(--text)] outline-none transition hover:border-[var(--text-faint)] hover:bg-[var(--bg-hover)] focus-visible:border-[var(--accent)] disabled:opacity-60"
+                >
+                  {picking ? <Loader2 size={15} className="shrink-0 animate-spin text-[var(--text-muted)]" /> : <FolderOpen size={15} className="shrink-0 text-[var(--text-muted)]" />}
+                  <span className="min-w-0 truncate">{folderName(folder) || '—'}</span>
+                  <ChevronDown size={12} aria-hidden className="shrink-0 text-[var(--text-faint)]" />
+                </button>
+              )}
+              {/* what the files are called: the project's own name unless typed over (a draft is named by its app) */}
+              {!toDrafts && folderDraft == null && (
                 <input
                   value={exportName}
                   spellCheck={false}
                   placeholder={props.title}
                   aria-label={t('exportCenter.fileName')}
+                  title={t('exportCenter.fileName')}
                   onChange={(e) => { setExportName(e.target.value); setNameTyped(true); }}
                   onFocus={(e) => e.currentTarget.select()}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.nativeEvent.isComposing && !disabled) { e.preventDefault(); void queue(requests); }
                   }}
-                  className="h-10 w-[220px] min-w-[140px] rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 text-[13px] text-[var(--text)] outline-none focus:border-[var(--text-faint)]"
+                  className="h-10 min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 text-[13px] text-[var(--text)] outline-none transition focus:border-[var(--text-faint)]"
                 />
-              </label>
-            )}
+              )}
+            </div>
             <div className="ml-auto flex min-w-0 items-center gap-4">
               <div className="min-w-0 text-right text-[12px] leading-snug">
                 {result ? (

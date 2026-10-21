@@ -238,6 +238,37 @@ test('a title with its subtitle inside it: its box hugs its own words, and moved
   }
 });
 
+test('words drawn in a fill of their page\'s own (gold words) say so; recolored with it taken over, they are drawn in the new color and the block inside keeps its own', { timeout: 60_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'of-stage-text-fill-'));
+  writeFileSync(join(dir, 'title.html'), `<!doctype html><head><style>.gold{color:#b39458!important;-webkit-text-fill-color:#b39458}</style></head><body style="margin:0">
+<h1 id="head" class="gold" style="position:absolute;left:20px;top:20px;margin:0;font:700 40px sans-serif">Only you<div id="sub" style="font-size:14px">for yourself</div></h1>
+<p id="plain" style="position:absolute;left:20px;top:120px;margin:0;font:20px sans-serif;color:#fff">Plain</p>
+<script>window.film={duration:2,frame(){}}</script></body>`);
+  writeFileSync(join(dir, 'film.html'), filmHtml({ stage: { w: 320, h: 180 }, tracks: [{ clips: [{ id: 'title', src: 'title.html' }] }] }));
+  const stage = await stageOf(dir);
+  try {
+    const page = stage.page.frames().find((f) => f.url().endsWith('title.html'));
+    const drawn = (id) => page.evaluate((id) => getComputedStyle(document.getElementById(id)).webkitTextFillColor, id);
+    const head = await stage.ask('hit', { x: 40, y: 40, detail: true });
+    assert.equal(head.style.color, '#b39458');
+    assert.equal(head.style.WebkitTextFillColor, '#b39458', 'its fill is told, though it is the color it has now');
+    const plain = await stage.ask('hit', { x: 30, y: 130, detail: true });
+    assert.equal(plain.style.WebkitTextFillColor, undefined, 'words drawn in their color have no fill of their own');
+    assert.equal(await page.evaluate(() => document.getElementById('plain').getAttribute('style')), 'position:absolute;left:20px;top:120px;margin:0;font:20px sans-serif;color:#fff', 'looked at, its style is as it was');
+
+    const subWas = await drawn('sub');
+    const patch = { style: { color: '#ff0000', WebkitTextFillColor: 'currentcolor' } };
+    const riders = await stage.ask('riders', { clip: 'title', at: '#head', patch });
+    assert.deepEqual(riders.map((r) => r.at), ['#sub']);
+    assert.equal(riders[0].patch.style?.WebkitTextFillColor, subWas, 'the block inside keeps the fill it was drawn in');
+    assert.equal(await stage.ask('tweak', { clip: 'title', at: '#head', patch }), true);
+    assert.equal(await drawn('head'), 'rgb(255, 0, 0)', 'drawn in the new color');
+    assert.equal((await stage.ask('hit', { x: 40, y: 40, detail: true })).style.WebkitTextFillColor, undefined, 'taken over, its fill follows its color');
+  } finally {
+    await stage.close();
+  }
+});
+
 test('a layer restyled leaves the others where they are, and takes its new size: the words beside a number stay put', { timeout: 60_000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'of-stage-hold-'));
   writeFileSync(join(dir, 'row.html'), `<!doctype html><body style="margin:0">

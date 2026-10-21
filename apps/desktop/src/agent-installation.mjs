@@ -15,7 +15,8 @@ export const AGENT_DOWNLOADS = Object.freeze(Object.fromEntries(OWN_AGENT_IDS.ma
 
 /**
  * Each agent's program, by the names it installs (the first found counts), and the folders its own installer puts it
- * in beside the usual ones (HOME_BIN_CANDIDATES): those are not always on the PATH an app gets.
+ * in beside the usual ones (HOME_BIN_CANDIDATES): those are not always on the PATH an app gets. `dirs` is told the
+ * home folder, whether this is Windows, and the folders apps are in (a Mac's).
  */
 export const AGENT_PROGRAMS = Object.freeze({
   claude: { names: ['claude'] },
@@ -33,7 +34,15 @@ export const AGENT_PROGRAMS = Object.freeze({
   kimi: { names: ['kimi'], dirs: (home) => [join(home, '.kimi-code', 'bin')] },
   /* MiniMax Code's own installer keeps it in ~/.minimax-code/bin */
   minimax: { names: ['mcode'], dirs: (home) => [join(home, '.minimax-code', 'bin')] },
+  /* DeepSeek Harness's desktop app carries the command (its own setting only links it into the PATH): inside
+     DeepSeek Harness.app on a Mac, in its install folder's resources on Windows */
+  deepseek: { names: ['dsh'], dirs: (home, win, apps = ['/Applications', join(home, 'Applications')]) => (win
+    ? [join(localAppData(home), 'Programs', 'DeepSeek Harness', 'resources', 'runtime', 'cli', 'bin')]
+    : apps.map((dir) => dirname(join(dir, 'DeepSeek Harness.app', DSH_IN_APP)))) },
 });
+
+/* where DeepSeek Harness is inside DeepSeek Harness.app, its desktop app (macOS) */
+const DSH_IN_APP = 'Contents/Resources/runtime/cli/bin/dsh';
 
 /** %LOCALAPPDATA% (Windows). */
 const localAppData = (home) => process.env.LOCALAPPDATA || join(home, 'AppData', 'Local');
@@ -395,7 +404,7 @@ export function chosenProgram(path, { names = [], win = windows } = {}) {
   let folder = false;
   try { folder = statSync(path).isDirectory(); } catch { /* a file, or not there */ }
   if (folder) {
-    const inApp = /\.app$/i.test(path) ? [...CODEX_IN_APP, OPENCODE_IN_APP, ...names.map((n) => `Contents/MacOS/${n}`)].map((p) => join(path, p)).find(executableFile) : null;
+    const inApp = /\.app$/i.test(path) ? [...CODEX_IN_APP, OPENCODE_IN_APP, DSH_IN_APP, ...names.map((n) => `Contents/MacOS/${n}`)].map((p) => join(path, p)).find(executableFile) : null;
     return inApp ?? names.map((n) => findExecutable(n, [path, join(path, 'bin')], { PATH: '' }, { win })).find(Boolean) ?? null;
   }
   if (win) {
@@ -423,7 +432,7 @@ export function detectAgentInstallation(id, { home = homedir(), env = process.en
   const install = AGENT_DOWNLOADS[id] ?? null;
   const picked = chosen ? chosenProgram(chosen, { names: program.names, win }) : null;
   if (picked && !notTheAgent(id, picked, { chosen, win })) return { installed: true, cli: picked, source: 'chosen', install };
-  const dirs = [...pathDirs, ...(program.dirs?.(home, win) ?? [])];
+  const dirs = [...pathDirs, ...(program.dirs?.(home, win, applicationDirs) ?? [])];
   let cli = null;
   for (const name of program.names) {
     if (cli) break;

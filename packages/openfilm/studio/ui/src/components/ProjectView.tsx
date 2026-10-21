@@ -63,7 +63,7 @@ import { SubtitleOverlay } from './SubtitleOverlay';
 import { SubtitleInspector, subtitleLineKey, type SubtitleLineAt, type SubtitleLineRefer } from './SubtitleInspector';
 import { useFilmSubtitles } from '@/lib/use-film-subtitles';
 import { speakerAt, useSubtitleEdits } from '@/lib/use-subtitle-edits';
-import { cueAt, filmSubtitleStyleFor, filmSubtitleWords, sameFilmSubtitleLanguage, type SubtitleCue } from '@/lib/subtitles';
+import { cueAt, filmSubtitleStyleFor, filmSubtitleWords, sameFilmSubtitleLanguage } from '@/lib/subtitles';
 import { DEFAULT_INSPECTOR, DOCK_GAP, DockPaneDivider, MIN_DOCK_H, MIN_INSPECTOR, MIN_STAGE_H, MIN_VIEWER, PaneDivider, usePaneSize } from './PaneDivider';
 import { PANE_BAR, PANE_BTN_ON, PANE_TOGGLE, PANE_TOGGLE_ICON } from './dock-pane-bar';
 import { Tooltip } from './Tooltip';
@@ -189,9 +189,6 @@ function clipIdAt(film: Film | null, loc: string): string | null {
   const at = parseFilmDocLoc(loc);
   return at ? film?.tracks[at.track]?.clips[at.clip]?.id ?? null : null;
 }
-
-/** No subtitles shown (fullscreen's CC off): the same list each time, so nothing renders again for it. */
-const NO_CUES: readonly SubtitleCue[] = [];
 
 export function ProjectView({ projectId, onProject, onLeave }: {
   projectId: string;
@@ -736,15 +733,12 @@ export function ProjectView({ projectId, onProject, onLeave }: {
   const [pickedSaved, setPickedSaved] = React.useState(false);
   const [inspectorContent, setInspectorContent] = React.useState<'selection' | 'subtitles' | WorkspaceResource>('selection');
   const subs = useFilmSubtitles(projectId);
-  /* fullscreen's CC button (and c): only what is shown, not the film's own setting */
-  const [captionsOn, setCaptionsOn] = React.useState(true);
   /* the subtitle over the picture renders again while playing only when another line, or another of its words, is said */
-  const shownCues = captionsOn ? subs.cues : NO_CUES;
   const subtitleStep = React.useCallback((ms: number) => {
-    const cue = subs.style.on ? cueAt(shownCues, ms) : null;
+    const cue = subs.style.on ? cueAt(subs.cues, ms) : null;
     if (!cue) return '';
-    return `${shownCues.indexOf(cue)}:${subs.style.karaoke ? filmSubtitleWords(cue, ms).map((w) => (w.active ? 1 : 0)).join('') : ''}`;
-  }, [shownCues, subs.style.on, subs.style.karaoke]);
+    return `${subs.cues.indexOf(cue)}:${subs.style.karaoke ? filmSubtitleWords(cue, ms).map((w) => (w.active ? 1 : 0)).join('') : ''}`;
+  }, [subs.cues, subs.style.on, subs.style.karaoke]);
   const configureSubtitles = React.useCallback(() => {
     setInspectorContent('subtitles');
     setInspectorOpen(!(inspectorOpen && inspectorContent === 'subtitles'));
@@ -2935,7 +2929,7 @@ export function ProjectView({ projectId, onProject, onLeave }: {
                             frame puts them on its own bottom (the bar), not pushed up with the picture */}
                         <LiveTime clock={playing ? clock : null} timeMs={timeMs} step={subtitleStep}>{(liveMs) => (
                           <SubtitleOverlay
-                            cues={shownCues}
+                            cues={subs.cues}
                             timeMs={liveMs}
                             style={filmSubtitleStyleFor(subs.style, frameBox)}
                             onMove={fullscreen ? undefined : subs.move}
@@ -2959,8 +2953,8 @@ export function ProjectView({ projectId, onProject, onLeave }: {
                           onToggleMute={() => { player.current.setMuted(!player.current.muted); setMutedState(player.current.muted); }}
                           onRate={setSpeed}
                           onExit={toggleFullscreen}
-                          captionsOn={subs.count ? captionsOn : undefined}
-                          onToggleCaptions={() => setCaptionsOn((v) => !v)}
+                          captionsOn={subs.count ? subs.style.on : undefined}
+                          onToggleCaptions={subs.toggle}
                         />
                       ) : null}
                     </div>
@@ -2986,7 +2980,6 @@ export function ProjectView({ projectId, onProject, onLeave }: {
                     onLoop: () => setLoop((on) => !on),
                     speed: rate,
                     onSpeed: setSpeed,
-                    captions: subs.count ? { on: captionsOn, onToggle: () => setCaptionsOn((v) => !v) } : null,
                   }}
                   onFullscreen={toggleFullscreen}
                 />

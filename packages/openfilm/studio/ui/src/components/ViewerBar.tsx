@@ -33,7 +33,7 @@ export function ViewerBar({
   onPlayPause: () => void;
   /** Full screen; the button is disabled while the film has no length. */
   onFullscreen?: () => void;
-  /** Loop, subtitles and speed (see PlaybackMenu). Without it there is no settings button. */
+  /** Loop and speed (see PlaybackMenu). Without it there is no settings button. */
   playback?: PlaybackSettings | null;
   /** Shown before the buttons on the right (the source viewer: the part marked). */
   extra?: React.ReactNode;

@@ -10,6 +10,12 @@ type Framing = { frame?: FilmFrameId; fill?: FilmFrameFill; burnSubtitles?: bool
 
 /** One export, as the server takes it. `range` is [from, to] in seconds; `name` is what its files are called (the
  * project's name when there is none). */
+/**
+ * How an editing-program export writes its pages. A draft: `auto` (a page with no clear pixel in any frame as H.264, the
+ * others as lossless PNG), `png`, or `prores` (422 HQ and 4444 the same way). An XML: ProRes 4444 or PNG.
+ */
+export type NleAlpha = 'auto' | 'png' | 'prores' | 'prores4444';
+
 export type ExportRequest = { range?: [number, number]; label?: string; name?: string } & (
   | (Framing & { kind: 'video'; codec: ExportVideoCodec; shortEdge?: number; fps: number; quality: ExportQuality; audio: boolean;
     clip?: string; scale?: number; preset?: string; sidecar?: 'srt' | 'vtt' })
@@ -20,7 +26,9 @@ export type ExportRequest = { range?: [number, number]; label?: string; name?: s
   | { kind: 'subtitles'; format: 'srt' | 'vtt' | 'txt' }
   | (Framing & { kind: 'slides'; format: 'pptx' | 'pdf'; shortEdge: number; at?: number[] })
   /* for an editing program: an XML and media folder; `media: 'link'` points at the sources where they are instead of cloning them */
-  | { kind: 'nle'; format?: 'xml' | 'fcpxml' | 'jianying' | 'capcut'; fps: number; audio: 'clips' | 'stems'; media?: 'copy' | 'link'; subtitles: boolean }
+  | { kind: 'nle'; format?: 'xml' | 'fcpxml' | 'jianying' | 'capcut'; fps: number; audio: 'clips' | 'stems'; media?: 'copy' | 'link'; subtitles: boolean;
+      /* how the pages, rendered with their alpha, are written */
+      alpha?: NleAlpha }
   /* the project itself: its work, and the parts of its .film asked; a zip of its folder, or the folder */
   | { kind: 'project'; parts: ProjectPart[]; as: 'zip' | 'folder' }
 );
@@ -59,6 +67,8 @@ export interface ExportJob {
   alpha: { any: boolean } | null;
   /** A draft's app's drafts folder that refused the write: the draft is in the exports folder instead. */
   draftsRefused?: string;
+  /** The export stopped because the disk is full. */
+  diskFull?: boolean;
   error?: string;
   /** Cancel was asked and the export is stopping (still `running` until it has). */
   cancelling?: boolean;

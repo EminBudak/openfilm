@@ -37,6 +37,7 @@ import { plainClipRefusal, type ClipEdit } from '@/lib/film-clip-edits';
 import { clipFieldPart, clipFields, compactBox, transformOf } from '@/lib/stage-clip';
 import type { TimelineBlock } from '@/lib/timeline-layout';
 import { editsForMoves } from '@/lib/timeline-drag';
+import { dbToVolume, VOLUME_DB_MAX, VOLUME_DB_MIN, volumeToDb } from '@/lib/loudness';
 import { useTimelinePrefs } from '@/lib/timeline-prefs';
 import { formatTimecode, FRAME_RATES, timecodeFps, useTimecodeFps } from '@/lib/timecode';
 import { MenuSelect } from './MenuSelect';
@@ -54,8 +55,9 @@ import {
 import {
   AdjustSection, AdvancedSection, AppearanceSection, CropSection, EffectsSection, FillSection, MaskSection, NEUTRAL, StrokeSection,
   TypographySection, camelOf,
-  isNeutral, kebabOf, makeLook, rawDeclarations, type Look, type LookRead, type LookSet,
+  isNeutral, kebabOf, rawDeclarations,
 } from './inspector-look';
+import { makeLook, type Look, type LookRead, type LookSet } from '@/lib/look';
 import type { MaskSession } from '@/lib/stage-mask';
 import type { MaskShape } from '@/lib/clip-mask';
 import type { FadeMs } from '@/lib/clip-fade';
@@ -1414,7 +1416,7 @@ function linearVolumeOf(b: TimelineBlock): number {
 function volumeEdits(blocks: readonly TimelineBlock[], apply: FieldApply): ClipEdit[] {
   return blocks.flatMap((b) => {
     if (!b.loc || !blockHasVolume(b)) return [];
-    const v = round3(Math.max(0, Math.min(2, apply(linearVolumeOf(b) * 100) / 100)));
+    const v = dbToVolume(apply(volumeToDb(linearVolumeOf(b))));
     if (v === round3(linearVolumeOf(b))) return [];
     if (parseFilmDocLoc(b.loc) != null) return [{ loc: b.loc, prop: 'volume', value: v }];
     return [{ loc: b.loc, prop: 'gainDb', value: filmVolumeToGainDb(v) ?? null }];
@@ -1919,16 +1921,18 @@ function SourceBar({ t, block, timecode, onSlip, onCommit, maxDurSec }: {
   );
 }
 
-/** Volume: a percentage (100% = as is) on a slider — adjusted by ear, so dragging beats typing. */
+/** Volume: dB (0 = as is) on a slider, as the ear hears it; adjusted by ear, so dragging beats typing. */
 function VolumeField({ value, onCommit, t }: { value: number | Mixed; onCommit: (apply: FieldApply) => void; t: T }) {
   return (
     <SliderField
       label={t('inspector.gainDb')}
-      value={value === MIXED ? MIXED : Math.round(value * 100)}
-      min={0}
-      max={200}
-      neutral={100}
-      unit="%"
+      value={value === MIXED ? MIXED : volumeToDb(value)}
+      min={VOLUME_DB_MIN}
+      max={VOLUME_DB_MAX}
+      neutral={0}
+      step={0.1}
+      unit="dB"
+      fieldWidth={72}
       onCommit={(_, apply) => onCommit(apply)}
     />
   );

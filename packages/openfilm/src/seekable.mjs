@@ -5,11 +5,12 @@
 // frame every quarter second, all but lossless (with its alpha, when it has one), made once and kept in the project's
 // cache; the render's pages are served the copy, and the sound is still mixed from the original.
 import { execFile } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
 import { extname, join, relative, sep } from 'node:path';
 import { colorTagsOf, encoders, h264ColorTags, hardwareEncoder, hardwareOptions, onTheChip } from './encoders.mjs';
 import { kindOf, readFilmFile, srcHref } from './film-doc.mjs';
-import { ffmpeg, fileOf, hash, outDir } from './shared.mjs';
+import { ffmpeg, fileOf, hash, kill, outDir } from './shared.mjs';
 
 /** A key frame further apart than this is slow to seek to frame by frame. */
 const SLOW_GOP_S = 0.5;
@@ -198,32 +199,74 @@ export async function seekableCopies(files, root, { signal, plays, slow = true }
       if (!need) continue;
       /* with an alpha to keep: VP9, which every Chromium decodes with its alpha; else H.264 */
       const out = `${base}${need.alpha ? '.webm' : '.mp4'}`;
-      const gop = Math.max(1, Math.round(need.fps * COPY_GOP_S));
-      const part = `${out}.part${extname(out)}`;
-      /* all but lossless: about 19 Mbps at 1080p and 30 fps; the chip's encoder keeps the source's color tags only
-         when told them */
-      const bits = Math.min(120e6, Math.max(4e6, ((need.w * need.h) || 1920 * 1080) * need.fps * 0.3));
-      /* decoded and written on the graphics chip when it can (encoders.mjs), else on the processor */
-      const make = async (/** @type {string | null} */ encoder, /** @type {string[]} */ decoding) => {
-        /* the same frames at the same times (passthrough: no frame is added or dropped), the picture only */
-        const run = ffmpeg([...decoding, '-i', file, '-map', '0:v:0', '-an', '-sn', '-dn', '-fps_mode', 'passthrough',
-          ...(need.alpha ? ['-c:v', 'libvpx-vp9', '-pix_fmt', 'yuva420p', '-b:v', '0', '-crf', '18', '-row-mt', '1', '-deadline', 'realtime', '-cpu-used', '8',
-            '-g', String(gop), '-keyint_min', String(gop), '-auto-alt-ref', '0']
-            : encoder ? ['-pix_fmt', 'nv12', ...hardwareOptions(encoder, bits, { gop }), ...h264ColorTags(await colorTagsOf(file))]
-              : ['-c:v', 'libx264', '-preset', 'superfast', '-crf', '16', '-g', String(gop), '-keyint_min', String(gop), '-pix_fmt', 'yuv420p']), part]);
-        const stop = () => run.proc.kill('SIGKILL');
-        signal?.addEventListener('abort', stop, { once: true });
-        try { await run.done; } finally { signal?.removeEventListener('abort', stop); }
+      /* one copy of a file at a time in this process (pages drawn at once may share a source): a render asking for one
+         being made waits for it, and makes it itself when the render making it was cancelled */
+      const shared = () => {
+        let job = making.get(out);
+        if (!job) {
+          job = makeCopy(file, out, need, signal).finally(() => making.delete(out));
+          making.set(out, job);
+        }
+        return job;
       };
-      try {
-        await onTheChip(need.alpha ? null : await hardwareEncoder('h264', await encoders()), make, signal);
-        renameSync(part, out);
-        known(out);
-      } catch {
-        rmSync(part, { force: true });
-      }
+      let result = await shared();
+      if (result === 'cancelled' && !signal?.aborted) result = await shared();
+      if (result === 'made') known(out);
     }
   };
   await Promise.all([worker(), worker()]);
   return copies;
+}
+
+/** @type {Map<string, Promise<'made' | 'failed' | 'cancelled'>>} the copies being made in this process, by their path */
+const making = new Map();
+
+/**
+ * `file`'s copy written to `out`, under a name of its own until it is whole: another process making the same copy
+ * never writes the same file, and the one renamed last is kept (the same picture). One that cannot replace a copy
+ * already there (Windows, while a browser reads it) uses that copy.
+ * @param {string} file @param {string} out @param {{ fps: number, w: number, h: number, alpha: boolean }} need @param {AbortSignal} [signal]
+ * @returns {Promise<'made' | 'failed' | 'cancelled'>}
+ */
+async function makeCopy(file, out, need, signal) {
+  if (signal?.aborted) return 'cancelled';
+  const gop = Math.max(1, Math.round(need.fps * COPY_GOP_S));
+  const part = `${out}.part-${process.pid}-${randomBytes(4).toString('hex')}${extname(out)}`;
+  /* all but lossless: about 19 Mbps at 1080p and 30 fps; the chip's encoder keeps the source's color tags only
+     when told them */
+  const bits = Math.min(120e6, Math.max(4e6, ((need.w * need.h) || 1920 * 1080) * need.fps * 0.3));
+  /* decoded and written on the graphics chip when it can (encoders.mjs), else on the processor */
+  const make = async (/** @type {string | null} */ encoder, /** @type {string[]} */ decoding) => {
+    /* the same frames at the same times (passthrough: no frame is added or dropped), the picture only */
+    const run = ffmpeg([...decoding, '-i', file, '-map', '0:v:0', '-an', '-sn', '-dn', '-fps_mode', 'passthrough',
+      ...(need.alpha ? ['-c:v', 'libvpx-vp9', '-pix_fmt', 'yuva420p', '-b:v', '0', '-crf', '18', '-row-mt', '1', '-deadline', 'realtime', '-cpu-used', '8',
+        '-g', String(gop), '-keyint_min', String(gop), '-auto-alt-ref', '0']
+        : encoder ? ['-pix_fmt', 'nv12', ...hardwareOptions(encoder, bits, { gop }), ...h264ColorTags(await colorTagsOf(file))]
+          : ['-c:v', 'libx264', '-preset', 'superfast', '-crf', '16', '-g', String(gop), '-keyint_min', String(gop), '-pix_fmt', 'yuv420p']), part]);
+    /* its whole tree: an ffmpeg that is a shim (Windows' package managers) runs the real one as its child */
+    const stop = () => kill(run.proc);
+    signal?.addEventListener('abort', stop, { once: true });
+    try { await run.done; } finally { signal?.removeEventListener('abort', stop); }
+  };
+  /* a part that cannot be removed (Windows, a moment after its encoder ends) stays in the cache folder: it never fails
+     the render that asked for the copy */
+  const drop = () => { try { rmSync(part, { force: true }); } catch { /* left */ } };
+  try {
+    await onTheChip(need.alpha ? null : await hardwareEncoder('h264', await encoders()), make, signal);
+  } catch {
+    drop();
+    return signal?.aborted ? 'cancelled' : 'failed';
+  }
+  /* a file a virus scanner or the indexer holds for a moment refuses to move on Windows (EPERM, EACCES, EBUSY): tried
+     again for a few seconds before the copy counts as not made */
+  for (let i = 1; ; i++) {
+    try {
+      renameSync(part, out);
+      return 'made';
+    } catch (e) {
+      if (existsSync(out)) { drop(); return 'made'; }
+      if (i >= 12 || !['EPERM', 'EACCES', 'EBUSY'].includes(/** @type {NodeJS.ErrnoException} */ (e).code ?? '')) { drop(); return 'failed'; }
+      await new Promise((r) => setTimeout(r, i * 100));
+    }
+  }
 }

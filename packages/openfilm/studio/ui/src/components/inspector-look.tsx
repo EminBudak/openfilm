@@ -17,13 +17,14 @@ import type { useT } from '@/i18n';
 import {
   ADJUST_KEYS, BLEND_MODES, FADE_DEFAULT, INNER_SHADOW_DEFAULT, PLACED_STROKE_DEFAULT, SHADOW_DEFAULT, adjustOf, backdropBlurCss,
   backdropBlurOf, cropCss, cropForRatio, cropOf, cropRatio, filterParts, framingCss, framingOf, innerShadowCss, innerShadowOf,
-  ownedDeclaration, placedStrokeCss, placedStrokeOf, pxOf, radiusCorners, shadowOf, strokeOf, withAdjust, withShadow, type AdjustKey, type Crop, type Fade,
+  ownedDeclaration, placedStrokeCss, placedStrokeOf, pxOf, radiusCorners, shadowOf, strokeOf, textColorCss, textColorOf, withAdjust, withShadow, type AdjustKey, type Crop, type Fade,
   type FadeSide, type InnerShadow, type PlacedStroke, type Shadow, type StrokePosition, type StrokeStyle,
 } from '@/lib/clip-look';
 import {
   MASK_FIELDS, MASK_SHAPES, fadeIn, maskDefault, maskOf, maskOwned, withFade, withMask, type Mask, type MaskBox, type MaskShape,
 } from '@/lib/clip-mask';
 import type { MaskSession } from '@/lib/stage-mask';
+import { previewSettled, type Look, type LookEdit, type LookRead, type LookSet } from '@/lib/look';
 import { knownAvailable, stylesOf } from '@/lib/font-menu';
 import {
   NAMED_WEIGHTS, isItalic, joinFontFamily, parseStyleValue, snapStyle, splitFontFamily, styleOptions, styleValue, weightKey, weightNumber,
@@ -33,91 +34,12 @@ import { FONT_SIZES, metricOf } from '@/lib/type-metrics';
 import { familyRenders, useInstalledFonts, useProjectFonts } from '@/lib/use-fonts';
 import { declarations } from '../../../../src/film-doc.mjs';
 import {
-  ColorField, EdgeGlyph, FontSizeGlyph, ICON, LetterSpacingGlyph, LineHeightGlyph, MIXED, MetricField, NumField, RadiusGlyph, RotateGlyph, Row, Section, SectionAction, Segmented, SelectField, SliderField, SubLabel, type FieldApply, type Mixed,
+  ColorField, EdgeGlyph, FontSizeGlyph, ICON, LetterSpacingGlyph, LineHeightGlyph, MIXED, MetricField, NumField, RadiusGlyph, RotateGlyph, Row, Section, SectionAction, Segmented, SelectField, SliderField, SubLabel, type FieldApply,
 } from './inspector-fields';
 import { FontFamilyPicker } from './FontFamilyPicker';
 import { Popover } from './Popover';
 
 type T = ReturnType<typeof useT>;
-
-/* ───────────────────────────── the model ───────────────────────────── */
-
-/** One thing's CSS property (kebab-case), as it is now. */
-export type LookRead = (prop: string) => string | undefined;
-/** Properties to write: a value, or null — "none of mine" (the panel decides what that leaves). */
-export type LookSet = Record<string, string | null>;
-/** What a control does to one thing, from that thing's own values. */
-export type LookEdit = (read: LookRead) => LookSet;
-
-export interface Look {
-  /** How many things it is. */
-  n: number;
-  /** What `fn` makes of every thing's values, when they agree; MIXED when they do not. */
-  common<V>(fn: (read: LookRead) => V): V | Mixed;
-  /** Shows an edit on the picture, nothing written. */
-  preview(edit: LookEdit): void;
-  /** Writes an edit, as one change. */
-  commit(edit: LookEdit): void;
-  /** Takes a preview back off the picture. */
-  revert(): void;
-}
-
-/**
- * A Look over `targets`: read each through `readOf`, and hand each one's properties to `write` (the panel stores
- * them). `write` gets only the things an edit changes.
- */
-export function makeLook<Tg>(
-  targets: readonly Tg[],
-  readOf: (t: Tg) => LookRead,
-  write: {
-    commit: (sets: [Tg, LookSet][]) => void;
-    preview?: (sets: [Tg, LookSet][]) => void;
-    revert?: () => void;
-  },
-): Look {
-  const reads = targets.map(readOf);
-  const sets = (edit: LookEdit, kept?: ReadonlyMap<string, string | undefined>[] | null): [Tg, LookSet][] => targets.flatMap((tg, i) => {
-    const read = reads[i]!;
-    const set = edit(read);
-    /* unchanged properties are not written: the agent reads the diff, and a no-op would be an undo step. Unchanged
-       from what was there before a preview: the layer is measured again while previewed, so by now it reads as the
-       preview, and a kept preview would read as no change */
-    const was = (k: string) => (kept?.[i]?.has(k) ? kept[i]!.get(k) : read(k));
-    const changed = Object.entries(set).filter(([k, v]) => (v ?? undefined) !== was(k));
-    return changed.length ? [[tg, Object.fromEntries(changed)] as [Tg, LookSet]] : [];
-  });
-  return {
-    n: targets.length,
-    common(fn) {
-      if (!reads.length) return MIXED;
-      const first = fn(reads[0]!);
-      const key = JSON.stringify(first);
-      return reads.every((r) => JSON.stringify(fn(r)) === key) ? first : MIXED;
-    },
-    /* shown as said, unchanged or not: a layer reads as its kept change while a preview paints over it, so painting
-       back what was there would read as no change */
-    preview(edit) {
-      if (!previewedBefore || previewedBefore.length !== targets.length) previewedBefore = targets.map(() => new Map());
-      const list = targets.flatMap((tg, i) => {
-        const set = edit(reads[i]!);
-        for (const k of Object.keys(set)) if (!previewedBefore![i]!.has(k)) previewedBefore![i]!.set(k, reads[i]!(k));
-        return Object.keys(set).length ? [[tg, set] as [Tg, LookSet]] : [];
-      });
-      write.preview?.(list);
-    },
-    commit(edit) {
-      const list = sets(edit, previewedBefore);
-      previewedBefore = null;
-      if (list.length) write.commit(list);
-    },
-    revert() { previewedBefore = null; write.revert?.(); },
-  };
-}
-
-/** What each previewed property of the things in hand was before its first preview (see makeLook's `sets`). */
-let previewedBefore: Map<string, string | undefined>[] | null = null;
-/** A preview was painted back by hand (as a preview of what was there): nothing previewed stands any more. */
-const previewSettled = () => { previewedBefore = null; };
 
 /** What a property is when nothing sets it: writing "none of mine" over a look the film's CSS gives, this is written. */
 export const NEUTRAL: Record<string, string> = {
@@ -678,22 +600,27 @@ export function FillSection({ look, t, fills, add }: {
         <SectionAction label={t('inspector.fillAdd')} onClick={() => look.commit(() => ({ [add.prop]: add.value }))}><Plus size={12} /></SectionAction>
       ) : null}
     >
-      {fills.map((f) => (
-        <div key={f.prop} className="flex items-center gap-1.5">
-          <div className="min-w-0 flex-1">
-            <ColorField
-              label={f.label}
-              value={look.common((read) => read(f.prop) ?? '')}
-              onPreview={(c) => look.preview(() => ({ [f.prop]: c }))}
-              onCommit={(c) => look.commit(() => ({ [f.prop]: c }))}
-            />
+      {fills.map((f) => {
+        /* words: the color they are drawn in, which a fill of their page's own paints over `color` */
+        const of = (read: LookRead) => (f.prop === 'color' ? textColorOf(read) : read(f.prop));
+        const to = (c: string): LookEdit => (read) => (f.prop === 'color' ? textColorCss(read, c) : { [f.prop]: c });
+        return (
+          <div key={f.prop} className="flex items-center gap-1.5">
+            <div className="min-w-0 flex-1">
+              <ColorField
+                label={f.label}
+                value={look.common((read) => of(read) ?? '')}
+                onPreview={(c) => look.preview(to(c))}
+                onCommit={(c) => look.commit(to(c))}
+              />
+            </div>
+            {f.removable ? (
+              /* see-through, not "none of mine": that would bring back the page's own fill */
+              <SectionAction label={t('inspector.fillRemove')} onClick={() => look.commit(() => ({ [f.prop]: 'transparent' }))}><Minus size={12} /></SectionAction>
+            ) : null}
           </div>
-          {f.removable ? (
-            /* see-through, not "none of mine": that would bring back the page's own fill */
-            <SectionAction label={t('inspector.fillRemove')} onClick={() => look.commit(() => ({ [f.prop]: 'transparent' }))}><Minus size={12} /></SectionAction>
-          ) : null}
-        </div>
-      ))}
+        );
+      })}
     </Section>
   );
 }

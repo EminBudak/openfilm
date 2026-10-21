@@ -355,6 +355,43 @@ test('a sought frame that is decoded but never presented (a seek just after load
   }
 });
 
+test('watched, a still moment whose video frame is decoded but never presented (Chromium) is sought again until it shows', { skip: !hasFfmpeg && 'no ffmpeg', timeout: 60_000 }, async () => {
+  const dir = footage('of-unshown-watched-');
+  writeFileSync(join(dir, 'film.html'), filmHtml({ stage: { w: 320, h: 180 }, tracks: [{ clips: [{ id: 'v', src: 'a.mp4', at: 1, time: [0, 4] }] }] }));
+  const s = await open(dir);
+  try {
+    const seen = await s.film.page.evaluate(async () => {
+      const v = document.querySelector('video');
+      /* every frame said presented goes through here; `swallow`: the next one is never said to be (the picture stays
+         where it was) */
+      const real = v.requestVideoFrameCallback.bind(v);
+      let swallow = false;
+      v.requestVideoFrameCallback = (callback) => real((now, meta) => {
+        if (!swallow) { callback(now, meta); return; }
+        swallow = false;
+        v.requestVideoFrameCallback(callback);
+      });
+      await window.__filmEditor.watch(1.5);
+      await new Promise((r) => setTimeout(r, 500));
+      const seeks = [];
+      v.addEventListener('seeking', () => seeks.push(v.currentTime));
+      swallow = true;
+      const t0 = performance.now();
+      await window.__filmEditor.watch(3.25);
+      /* the editor is told the moment is drawn at once: the scrub goes on as fast as the decoder */
+      const told = performance.now() - t0;
+      await new Promise((r) => setTimeout(r, 2500));
+      return { seeks, told, swallowed: !swallow };
+    });
+    assert.ok(seen.swallowed, 'the frame was presented, and not said to be');
+    assert.equal(seen.seeks.length, 2, `sought again once: ${JSON.stringify(seen)}`);
+    assert.ok(Math.abs(seen.seeks[1] - 2.25) < 0.002, `the same frame: ${seen.seeks[1]}`);
+    assert.ok(seen.told < 900, `${Math.round(seen.told)} ms`);
+  } finally {
+    await s.close();
+  }
+});
+
 test('a video woken ahead while hidden, then shown: its old frame presented again after the seek is not taken for the sought one', { skip: !hasFfmpeg && 'no ffmpeg', timeout: 60_000 }, async () => {
   const dir = footage('of-stale-frame-');
   writeFileSync(join(dir, 'film.html'), filmHtml({ stage: { w: 320, h: 180 }, tracks: [{ clips: [{ id: 'v', src: 'a.mp4', at: 2, time: [0, 4] }] }] }));
