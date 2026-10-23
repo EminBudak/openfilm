@@ -104,6 +104,47 @@ test('the drafts folders: 剪映\'s and CapCut\'s, on a Mac and on Windows, when
   assert.equal(draftsRoot('jianying', { platform: 'darwin', home: '/mac-home', read, exists: (p) => p === mac('JianyingPro') }), mac('JianyingPro'));
 });
 
+test('custom drafts folders: Qt quotes and escapes are decoded for both apps on Mac and Windows', async (t) => {
+  const cases = [
+    { name: 'quoted punctuation', value: '"/drafts/Film, cut; take=2"', path: '/drafts/Film, cut; take=2' },
+    { name: 'escaped backslashes', value: String.raw`D:\\Film Cuts\\Drafts`, path: String.raw`D:\Film Cuts\Drafts` },
+    { name: 'escaped Unicode', value: String.raw`/drafts/\x8349\x7a3f\xd83c\xdfac`, path: '/drafts/草稿🎬' },
+    { name: 'escaped quotes', value: String.raw`"/drafts/Film \"One\""`, path: '/drafts/Film "One"' },
+  ];
+  for (const app of ['jianying', 'capcut']) {
+    for (const platform of ['darwin', 'win32']) {
+      for (const { name, value, path } of cases) {
+        await t.test(`${app} on ${platform}: ${name}`, () => {
+          const got = draftsRoot(app, {
+            platform, home: '/draft-home', localAppData: '/local-app-data',
+            read: () => `[General]\ncurrentCustomDraftPath=${value}\n`,
+            exists: (p) => p === path || p.endsWith('com.lveditor.draft'),
+          });
+          assert.equal(got, path, 'the custom folder takes precedence over the default');
+        });
+      }
+    }
+  }
+});
+
+test('custom drafts folders: read the General section, allowing whitespace and CRLF', () => {
+  const read = () => '\ufeff[Other]\r\ncurrentCustomDraftPath=/wrong\r\n[General]\r\n; currentCustomDraftPath=/comment\r\n  currentCustomDraftPath = "/drafts/Film Cuts"  \r\n[Later]\r\ncurrentCustomDraftPath=/later\r\n';
+  assert.equal(draftsRoot('jianying', { platform: 'darwin', home: '/draft-home', read, exists: () => true }), '/drafts/Film Cuts');
+  assert.equal(draftsRoot('capcut', {
+    platform: 'darwin', home: '/draft-home', read: () => '[Other]\ncurrentCustomDraftPath=/wrong\n',
+    exists: () => true,
+  }), join('/draft-home', 'Movies', 'CapCut', 'User Data', 'Projects', 'com.lveditor.draft'));
+});
+
+test('custom drafts folders: empty or missing decoded paths fall back to an existing default', () => {
+  const fallback = join('/draft-home', 'Movies', 'JianyingPro', 'User Data', 'Projects', 'com.lveditor.draft');
+  for (const value of ['', '""', '"/disconnected/Drafts"']) {
+    const where = { platform: 'darwin', home: '/draft-home', read: () => `[General]\ncurrentCustomDraftPath=${value}\n` };
+    assert.equal(draftsRoot('jianying', { ...where, exists: (p) => p === fallback }), fallback);
+    assert.equal(draftsRoot('jianying', { ...where, exists: () => false }), null);
+  }
+});
+
 test('a draft says which app wrote it: 剪映 or CapCut', () => {
   const jy = jianyingDraft(plan(), { name: 'Film', folder: '/d/Film', root: '/d' }).info;
   const cc = jianyingDraft(plan(), { app: 'capcut', name: 'Film', folder: '/d/Film', root: '/d' }).info;

@@ -40,6 +40,24 @@ import { join } from 'node:path';
 /** Each app's folder, in Movies on a Mac and in the local app data on Windows. */
 const APP_FOLDER = /** @type {Record<DraftApp, string>} */ ({ jianying: 'JianyingPro', capcut: 'CapCut' });
 
+/** The custom folder in Qt's INI: quotes and escapes are storage syntax, not part of the path. @param {string} settings */
+function customDraftPath(settings) {
+  let section = 'General';
+  for (const row of settings.split(/\r?\n/)) {
+    const line = row.trim();
+    const heading = /^\[(.*)\]$/.exec(line);
+    if (heading) { section = heading[1]; continue; }
+    if (section !== 'General') continue;
+    const entry = /^currentCustomDraftPath\s*=\s*(.*)$/.exec(line);
+    if (!entry) continue;
+    const value = entry[1].startsWith('"') && entry[1].endsWith('"') ? entry[1].slice(1, -1) : entry[1];
+    const escapes = /** @type {Record<string, string>} */ ({ '0': '\0', a: '\x07', b: '\b', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v' });
+    return value.replace(/\\(?:x([0-9a-fA-F]{1,4})|(.))/g,
+      (_match, hex, char) => hex ? String.fromCharCode(parseInt(hex, 16)) : escapes[char] ?? char) || null;
+  }
+  return null;
+}
+
 /**
  * Where 剪映 or CapCut keeps its drafts: the folder its Settings › Drafts location names (`currentCustomDraftPath` in
  * its `User Data/Config/globalSetting`, the same in both apps), else its default one, when that folder is there; else
@@ -53,7 +71,7 @@ export function draftsRoot(app, { platform = process.platform, home, localAppDat
   const user = join(base, APP_FOLDER[app], 'User Data');
   let chosen = null;
   try {
-    chosen = /^currentCustomDraftPath=(.+)$/m.exec(read(join(user, 'Config', 'globalSetting')))?.[1].trim() || null;
+    chosen = customDraftPath(read(join(user, 'Config', 'globalSetting')));
   } catch { /* the app has saved no settings yet */ }
   for (const dir of [chosen, join(user, 'Projects', 'com.lveditor.draft')]) if (dir && exists(dir)) return dir;
   return null;
