@@ -192,6 +192,11 @@ const PLAYHEAD_BLEED = 8;
 const RIPPLE_WAIT_MS = 1000;
 /** Within this many pixels either side of the playhead line, a press in the track area grabs the playhead. */
 const PLAYHEAD_GRAB_PX = 4;
+/* the key the ruler refers time with, the one a box is drawn with on the picture (FilmStageSelect): ⌘ on a Mac (its
+   Ctrl-click is a right click), Ctrl elsewhere */
+const MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+const REFER_KEY = MAC ? 'Meta' : 'Control';
+const referKeyHeld = (e: { metaKey: boolean; ctrlKey: boolean }) => (MAC ? e.metaKey : e.ctrlKey);
 /* the range bar's hit height (the visible bar is thinner, see .tl-range-thumb; 5 px could hardly be hit) */
 const H_SCROLL_H = 10;
 const RULER_H = 20;
@@ -576,9 +581,9 @@ export interface TimelineProps {
    */
   onReferSelection?: (what: { blocks: readonly TimelineBlock[]; range: FilmRange | null; atMs: number | null }) => void;
   /**
-   * With the app's chat: the ruler points at time for it. A click there is that moment, a drag that span, each one
-   * a pill in the chat; the playhead does not go there (it is dragged by its knob, or a click in the tracks' empty
-   * space). Without it the ruler moves the playhead.
+   * With the app's chat: the ruler points at time for it with ⌘ (Ctrl on Windows) held, as a box is drawn on the
+   * picture. A ⌘-click there is that moment, a ⌘-drag that span, each one a pill in the chat. A plain click or drag
+   * moves the playhead, as without it.
    */
   onReferRuler?: (what: { atMs: number } | { range: FilmRange }) => void;
   /** The bar's Duplicate: copies of the clips right after them. */
@@ -1896,20 +1901,39 @@ export const Timeline = React.memo(function Timeline({
   }, [playable, msAtClientX, laneAtY, contentY, tracks, selectOne, onScrubCommit, warmPlayheadAt, setSelected, withLinked, onEditOps, pxPerMs]);
 
   /*
-   * With the app's chat, the ruler points at time for it (onReferRuler): a click there is that moment, a drag that
-   * span, drawn as it is pulled. A press on the playhead (its knob, ±4 px) still drags it.
+   * With the app's chat, the ruler points at time for it (onReferRuler) while ⌘ (Ctrl) is held: a ⌘-click there is
+   * that moment, a ⌘-drag that span, drawn as it is pulled. Without ⌘ it scrubs.
    */
   const [referDraft, setReferDraft] = React.useState<FilmRange | null>(null);
-  /* where the pointer is on the ruler (film ms), shown as the moment a click would refer; not near the playhead (its
-     knob is dragged there) */
+  /* where the pointer is on the ruler (film ms) while ⌘ is held, shown as the moment a click would refer */
   const [rulerHoverMs, setRulerHoverMs] = React.useState<number | null>(null);
+  /* the pointer's x over the ruler, so ⌘ pressed or let go there shows or hides that moment without a move */
+  const rulerPointerX = React.useRef<number | null>(null);
   /* the ruler's own menu, open (rulerMenu) */
   const [rulerMenuAt, setRulerMenuAt] = React.useState<{ x: number; y: number; items: ContextMenuEntry[] } | null>(null);
   const hoverRuler = React.useCallback((e: React.PointerEvent) => {
     if (!onReferRuler || !playable) return;
-    /* on a marker's pin: the pin is what a click there is about */
-    setRulerHoverMs(playheadGapPx(e.clientX, timeMsRef.current) > PLAYHEAD_GRAB_PX ? Math.max(0, Math.min(totalMs, msAtClientX(e.clientX))) : null);
-  }, [onReferRuler, playable, playheadGapPx, totalMs, msAtClientX]);
+    rulerPointerX.current = e.clientX;
+    setRulerHoverMs(referKeyHeld(e) ? Math.max(0, Math.min(totalMs, msAtClientX(e.clientX))) : null);
+  }, [onReferRuler, playable, totalMs, msAtClientX]);
+  React.useEffect(() => {
+    if (!onReferRuler || !playable) return;
+    const key = (e: KeyboardEvent) => {
+      const x = rulerPointerX.current;
+      if (e.key !== REFER_KEY || x == null) return;
+      setRulerHoverMs(e.type === 'keydown' ? Math.max(0, Math.min(totalMs, msAtClientX(x))) : null);
+    };
+    /* ⌘ let go in another window (⌘-Tab) sends no keyup here */
+    const off = () => setRulerHoverMs(null);
+    window.addEventListener('keydown', key);
+    window.addEventListener('keyup', key);
+    window.addEventListener('blur', off);
+    return () => {
+      window.removeEventListener('keydown', key);
+      window.removeEventListener('keyup', key);
+      window.removeEventListener('blur', off);
+    };
+  }, [onReferRuler, playable, totalMs, msAtClientX]);
   const startRefer = React.useCallback((e: React.PointerEvent) => {
     if (e.button !== 0 || !playable || !onReferRuler) return;
     e.preventDefault();
@@ -4074,11 +4098,11 @@ export const Timeline = React.memo(function Timeline({
               aria-valuenow={Math.round(timeMs)}
               aria-valuetext={`${formatTimecode(timeMs)} / ${formatTimecode(totalMs)}`}
               onPointerDown={(e) => (e.shiftKey && onRangeChange ? startRange(e)
-                : onReferRuler && playheadGapPx(e.clientX, timeMsRef.current) > PLAYHEAD_GRAB_PX ? startRefer(e)
+                : referKeyHeld(e) && onReferRuler ? startRefer(e)
                   : startScrub(e, true))}
               onKeyDown={onKeyDown}
               onPointerMove={hoverRuler}
-              onPointerLeave={() => setRulerHoverMs(null)}
+              onPointerLeave={() => { rulerPointerX.current = null; setRulerHoverMs(null); }}
               onContextMenu={rulerMenu ? (e) => {
                 e.preventDefault();
                 const items = rulerMenu(Math.max(0, Math.min(totalMs, msAtClientX(e.clientX))));
@@ -4087,8 +4111,8 @@ export const Timeline = React.memo(function Timeline({
               /* the point picked on the ruler is let go with the timeline's focus */
               onBlur={() => setBarFocus((f) => (f === 'point' ? null : f))}
               className="relative h-full touch-none select-none outline-none"
-              /* pointing at time for the chat: a hand, and the moment under it drawn (the playhead's knob keeps its own) */
-              style={{ width: trackPx, cursor: onReferRuler ? (rulerHoverMs == null && !referDraft ? 'col-resize' : 'pointer') : 'col-resize' }}
+              /* pointing at time for the chat (⌘ held): a crosshair, as on the picture, and the moment under it drawn */
+              style={{ width: trackPx, cursor: onReferRuler ? (rulerHoverMs == null && !referDraft ? 'col-resize' : 'crosshair') : 'col-resize' }}
             >
               {tickMarks}
               {previewBar?.length ? <PreviewBar ranges={previewBar} pxPerMs={pxPerMs} /> : null}
@@ -4881,7 +4905,7 @@ const chatClock = (ms: number): string => {
 };
 
 /**
- * What a click or a drag on the ruler gives the chat, drawn where it will be: under the pointer a line and a tag with
+ * What a ⌘-click or a ⌘-drag on the ruler gives the chat, drawn where it will be: under the pointer a line and a tag with
  * the moment (the chat's mark and its time, as its pill will read), while dragged the span and its two ends. In the
  * timeline's accent, as its switches; it takes no pointer.
  */
