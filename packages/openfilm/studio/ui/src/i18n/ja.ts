@@ -3,6 +3,9 @@ import type { Words } from './words.ts';
 /** what the system's file manager is called here */
 const FILES = typeof navigator !== 'undefined' && /^win/i.test(navigator.platform) ? 'エクスプローラー'
   : typeof navigator !== 'undefined' && /^mac/i.test(navigator.platform) ? 'Finder' : 'ファイル';
+/* the system's trash, by its name there */
+const TRASH = typeof navigator !== 'undefined' && /^win/i.test(navigator.platform) ? 'ごみ箱'
+  : typeof navigator !== 'undefined' && /^mac/i.test(navigator.platform) ? 'ゴミ箱' : 'ゴミ箱';
 
 export const ja: Words = {
   nav: {
@@ -55,9 +58,9 @@ export const ja: Words = {
     noneInstalled: 'まだありません。OpenFilm のスキルはこちら：',
     fromAgent: '{name} から',
     agentHint: 'エージェント自身のもの。オンにしたものだけ使います。',
-    removeTitle: '「{name}」をゴミ箱に移動しますか？',
-    removeHint: 'エージェントは使わなくなります。ゴミ箱から戻せます。',
-    remove: 'ゴミ箱に移動',
+    removeTitle: `「{name}」を${TRASH}に移動しますか？`,
+    removeHint: `エージェントは使わなくなります。${TRASH}から戻せます。`,
+    remove: `${TRASH}に移動`,
     tryNow: '試す',
     tryOff: 'オンにすると試せます',
     details: '詳細',
@@ -179,8 +182,8 @@ export const ja: Words = {
     folderNamePlaceholder: 'フォルダー名',
     renameFolder: 'フォルダー名を変更',
     deleteFolder: 'フォルダーを削除',
-    deleteFolderHint: 'フォルダーを削除し、中の {n} 件のプロジェクトをゴミ箱に移動します。ゴミ箱から元に戻せます。',
-    deleteFolderHintOne: 'フォルダーを削除し、中のプロジェクトをゴミ箱に移動します。ゴミ箱から元に戻せます。',
+    deleteFolderHint: `フォルダーを削除し、中の {n} 件のプロジェクトを${TRASH}に移動します。${TRASH}から元に戻せます。`,
+    deleteFolderHintOne: `フォルダーを削除し、中のプロジェクトを${TRASH}に移動します。${TRASH}から元に戻せます。`,
     deleteFolderHintEmpty: 'フォルダーを削除します。中にプロジェクトはありません。',
     renameTaken: '「{name}」は使用されています。同じ名前のフォルダーがすでにあります。別の名前を選んでください。',
     moveToTitle: '「{name}」を移動',
@@ -682,12 +685,12 @@ export const ja: Words = {
     commit: 'コミット',
     discard: '変更を破棄',
     discardTitle: 'コミットしていない変更をすべて破棄しますか？',
-    discardBody: '映像は最後のコミットに戻ります。その後に追加したファイルはゴミ箱に移ります。',
+    discardBody: `映像は最後のコミットに戻ります。その後に追加したファイルは${TRASH}に移ります。`,
     historyOf: '履歴 · {branch}',
     restore: 'このバージョンに戻す',
     restoreTitle: '「{name}」に戻しますか？',
     restoreBody: '映像がこのバージョンになり、コミットしていない変更として表示されます。コミットすれば残り、破棄すれば今に戻ります。',
-    restoreDirtyBody: 'コミットしていない変更があります。戻す前にそれらを破棄します（追加したファイルはゴミ箱に移ります）。',
+    restoreDirtyBody: `コミットしていない変更があります。戻す前にそれらを破棄します（追加したファイルは${TRASH}に移ります）。`,
     restoreDiscard: '破棄して戻す',
     restoreConfirm: '戻す',
     restoredMessage: '「{name}」に戻した',
@@ -780,9 +783,9 @@ export const ja: Words = {
     renameKind: '「{from}」の名前を「{to}」に変更できません。拡張子はファイルの種類を表しており、この変更では種類が変わってしまいます。同じ種類の拡張子のままにしてください。',
     delete: '削除',
     deleteConfirmTitle: 'この素材を削除しますか？',
-    deleteConfirm: 'ゴミ箱に移動します。ゴミ箱から元に戻せます。',
-    deleteAlsoClip: 'ゴミ箱に移動します。ゴミ箱から元に戻せます。タイムライン上でこれを使っているクリップも削除されます。',
-    deleteAlsoClips: 'ゴミ箱に移動します。ゴミ箱から元に戻せます。タイムライン上でこれを使っている {n} 個のクリップも削除されます。',
+    deleteConfirm: `${TRASH}に移動します。${TRASH}から元に戻せます。`,
+    deleteAlsoClip: `${TRASH}に移動します。${TRASH}から元に戻せます。タイムライン上でこれを使っているクリップも削除されます。`,
+    deleteAlsoClips: `${TRASH}に移動します。${TRASH}から元に戻せます。タイムライン上でこれを使っている {n} 個のクリップも削除されます。`,
     deleteFailed: '削除できませんでした',
     extractAudio: 'オーディオを新しいファイルとして抽出',
     extractAudioFailed: 'そのビデオからサウンドを取り出せませんでした',
@@ -859,9 +862,9 @@ export const ja: Words = {
     moveHere: "すでにここにあります",
     deleteMany: "{n} 個の項目を削除",
     deleteManyTitle: "{n} 個の項目を削除しますか？",
-    deleteManyConfirm: "ゴミ箱に移動します。ゴミ箱から元に戻せます。",
-    deleteManyAlsoClip: "ゴミ箱に移動します。ゴミ箱から元に戻せます。タイムライン上でこれらを使っているクリップも削除されます。",
-    deleteManyAlsoClips: "ゴミ箱に移動します。ゴミ箱から元に戻せます。タイムライン上でこれらを使っている {n} 個のクリップも削除されます。",
+    deleteManyConfirm: `${TRASH}に移動します。${TRASH}から元に戻せます。`,
+    deleteManyAlsoClip: `${TRASH}に移動します。${TRASH}から元に戻せます。タイムライン上でこれらを使っているクリップも削除されます。`,
+    deleteManyAlsoClips: `${TRASH}に移動します。${TRASH}から元に戻せます。タイムライン上でこれらを使っている {n} 個のクリップも削除されます。`,
     importFiles: "ファイルを読み込む…",
     importFilesNote: "プロジェクトにコピーします",
     linkFiles: "ファイルをリンク…",
@@ -1478,9 +1481,9 @@ export const ja: Words = {
   confirm: {
     ok: '確認',
     deleteTitle: 'このプロジェクトを削除しますか？',
-    deleteDesc: '映像とその中身すべてを含むフォルダーがゴミ箱に移動します。',
+    deleteDesc: `映像とその中身すべてを含むフォルダーが${TRASH}に移動します。`,
     deleteManyTitle: 'これら {n} 件のプロジェクトを削除しますか？',
-    deleteManyDesc: '映像とその中身すべてを含むフォルダーがゴミ箱に移動します。',
+    deleteManyDesc: `映像とその中身すべてを含むフォルダーが${TRASH}に移動します。`,
     delete: '削除',
     cancel: 'キャンセル',
   },

@@ -1,5 +1,9 @@
 import type { Words } from './words';
 
+/* the system's trash, by its name there */
+const TRASH = typeof navigator !== 'undefined' && /^win/i.test(navigator.platform) ? 'la Papelera de reciclaje'
+  : typeof navigator !== 'undefined' && /^mac/i.test(navigator.platform) ? 'la Papelera' : 'la papelera';
+
 export const es: Words = {
   /* a turn of the app's own agent stopped: the service its model runs on has no balance left (BalanceNotice) */
   balance: {
@@ -288,7 +292,7 @@ export const es: Words = {
     cardDoes: 'Para qué sirve',
     next: 'Siguiente',
     cancel: 'Cancelar',
-    replaceNote: 'Ya tienes {names}: al añadirla, la anterior va a la papelera.',
+    replaceNote: `Ya tienes {names}: al añadirla, la anterior va a ${TRASH}.`,
     replaceAndAdd: 'Reemplazar y añadir',
     scriptsCount: '{n} scripts',
     fromLink: 'Desde un enlace',

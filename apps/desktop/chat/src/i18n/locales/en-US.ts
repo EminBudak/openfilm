@@ -1,4 +1,9 @@
 /** The chat's words (English): the paths its components look up with useT(). */
+
+/* the system's trash, by its name there */
+const TRASH = typeof navigator !== 'undefined' && /^win/i.test(navigator.platform) ? 'the Recycle Bin'
+  : typeof navigator !== 'undefined' && /^mac/i.test(navigator.platform) ? 'the Trash' : 'the trash';
+
 export const enUS = {
   /* a turn of the app's own agent stopped: the service its model runs on has no balance left (BalanceNotice) */
   balance: {
@@ -288,7 +293,7 @@ export const enUS = {
     cardDoes: 'What it does',
     next: 'Next',
     cancel: 'Cancel',
-    replaceNote: 'You have {names} already: adding it moves the old one to the trash.',
+    replaceNote: `You have {names} already: adding it moves the old one to ${TRASH}.`,
     replaceAndAdd: 'Replace and add',
     scriptsCount: '{n} scripts',
     fromLink: 'From a link',

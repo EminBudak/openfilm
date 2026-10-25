@@ -1,5 +1,9 @@
 import type { Words } from './words';
 
+/* the system's trash, by its name there */
+const TRASH = typeof navigator !== 'undefined' && /^win/i.test(navigator.platform) ? '回收站'
+  : typeof navigator !== 'undefined' && /^mac/i.test(navigator.platform) ? '废纸篓' : '回收站';
+
 export const zhCN: Words = {
   /* a turn of the app's own agent stopped: the service its model runs on has no balance left (BalanceNotice) */
   balance: {
@@ -288,7 +292,7 @@ export const zhCN: Words = {
     cardDoes: '用途',
     next: '下一步',
     cancel: '取消',
-    replaceNote: '你已经有 {names}，添加后旧的会移到废纸篓。',
+    replaceNote: `你已经有 {names}，添加后旧的会移到${TRASH}。`,
     replaceAndAdd: '替换并添加',
     scriptsCount: '{n} 个脚本',
     fromLink: '从链接',

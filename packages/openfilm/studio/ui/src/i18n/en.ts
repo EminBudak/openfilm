@@ -4,6 +4,9 @@
 /** what the system's file manager is called here */
 const FILES = typeof navigator !== 'undefined' && /^win/i.test(navigator.platform) ? 'File Explorer'
   : typeof navigator !== 'undefined' && /^mac/i.test(navigator.platform) ? 'Finder' : 'Files';
+/* the system's trash, by its name there */
+const TRASH = typeof navigator !== 'undefined' && /^win/i.test(navigator.platform) ? 'the Recycle Bin'
+  : typeof navigator !== 'undefined' && /^mac/i.test(navigator.platform) ? 'the Trash' : 'the trash';
 
 export const en = {
   nav: {
@@ -56,9 +59,9 @@ export const en = {
     noneInstalled: 'None installed yet. Find OpenFilm\'s in',
     fromAgent: 'From {name}',
     agentHint: 'Your agent\'s own. Off until you turn one on.',
-    removeTitle: 'Move “{name}” to the trash?',
-    removeHint: 'Agents stop using it. You can put it back from the trash.',
-    remove: 'Move to trash',
+    removeTitle: `Move “{name}” to ${TRASH}?`,
+    removeHint: `Agents stop using it. You can put it back from ${TRASH}.`,
+    remove: `Move to ${TRASH}`,
     tryNow: 'Try now',
     tryOff: 'Turn it on to try it',
     details: 'Details',
@@ -180,8 +183,8 @@ export const en = {
     folderNamePlaceholder: 'Folder name',
     renameFolder: 'Rename folder',
     deleteFolder: 'Delete folder',
-    deleteFolderHint: 'Deletes the folder and moves the {n} projects inside it to the Trash, where you can take them back.',
-    deleteFolderHintOne: 'Deletes the folder and moves the project inside it to the Trash, where you can take it back.',
+    deleteFolderHint: `Deletes the folder and moves the {n} projects inside it to ${TRASH}, where you can take them back.`,
+    deleteFolderHintOne: `Deletes the folder and moves the project inside it to ${TRASH}, where you can take it back.`,
     deleteFolderHintEmpty: 'Deletes the folder. There are no projects in it.',
     renameTaken: '“{name}” is taken: there is already a folder with that name. Choose another.',
     moveToTitle: 'Move “{name}”',
@@ -683,12 +686,12 @@ export const en = {
     commit: 'Commit',
     discard: 'Discard changes',
     discardTitle: 'Discard all uncommitted changes?',
-    discardBody: 'The film goes back to its last commit. Files added since move to the Trash.',
+    discardBody: `The film goes back to its last commit. Files added since move to ${TRASH}.`,
     historyOf: 'History · {branch}',
     restore: 'Restore this version',
     restoreTitle: 'Restore “{name}”?',
     restoreBody: 'The film becomes this version, as uncommitted changes: commit them to keep it, or discard them to come back.',
-    restoreDirtyBody: 'You have uncommitted changes. Restoring discards them first (files added since move to the Trash).',
+    restoreDirtyBody: `You have uncommitted changes. Restoring discards them first (files added since move to ${TRASH}).`,
     restoreDiscard: 'Discard and restore',
     restoreConfirm: 'Restore',
     restoredMessage: 'Back to “{name}”',
@@ -781,9 +784,9 @@ export const en = {
     renameKind: '“{from}” can’t be renamed “{to}”: the ending says what a file is, and this one would change it. Keep an ending of the same kind.',
     delete: 'Delete',
     deleteConfirmTitle: 'Delete this asset?',
-    deleteConfirm: 'It moves to the Trash, where you can take it back.',
-    deleteAlsoClip: 'It moves to the Trash, where you can take it back. The clip using it on the timeline is removed too.',
-    deleteAlsoClips: 'It moves to the Trash, where you can take it back. The {n} clips using it on the timeline are removed too.',
+    deleteConfirm: `It moves to ${TRASH}, where you can take it back.`,
+    deleteAlsoClip: `It moves to ${TRASH}, where you can take it back. The clip using it on the timeline is removed too.`,
+    deleteAlsoClips: `It moves to ${TRASH}, where you can take it back. The {n} clips using it on the timeline are removed too.`,
     deleteFailed: 'Could not delete',
     extractAudio: 'Extract audio as a new file',
     extractAudioFailed: 'Couldn’t take the sound out of that video',
@@ -860,9 +863,9 @@ export const en = {
     moveHere: "It’s already here",
     deleteMany: "Delete {n} items",
     deleteManyTitle: "Delete {n} items?",
-    deleteManyConfirm: "They move to the Trash, where you can take them back.",
-    deleteManyAlsoClip: "They move to the Trash, where you can take them back. The clip using one of them on the timeline is removed too.",
-    deleteManyAlsoClips: "They move to the Trash, where you can take them back. The {n} clips using them on the timeline are removed too.",
+    deleteManyConfirm: `They move to ${TRASH}, where you can take them back.`,
+    deleteManyAlsoClip: `They move to ${TRASH}, where you can take them back. The clip using one of them on the timeline is removed too.`,
+    deleteManyAlsoClips: `They move to ${TRASH}, where you can take them back. The {n} clips using them on the timeline are removed too.`,
     importFiles: "Import files…",
     importFilesNote: "A copy goes into the project",
     linkFiles: "Link files…",
@@ -1479,9 +1482,9 @@ export const en = {
   confirm: {
     ok: 'Confirm',
     deleteTitle: 'Delete this project?',
-    deleteDesc: 'Its folder, with the film and everything in it, moves to the Trash.',
+    deleteDesc: `Its folder, with the film and everything in it, moves to ${TRASH}.`,
     deleteManyTitle: 'Delete these {n} projects?',
-    deleteManyDesc: 'Their folders, with the films and everything in them, move to the Trash.',
+    deleteManyDesc: `Their folders, with the films and everything in them, move to ${TRASH}.`,
     delete: 'Delete',
     cancel: 'Cancel',
   },

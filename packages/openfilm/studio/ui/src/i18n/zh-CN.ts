@@ -4,6 +4,9 @@ import type { Words } from './words.ts';
 /** what the system's file manager is called here */
 const FILES = typeof navigator !== 'undefined' && /^win/i.test(navigator.platform) ? '文件资源管理器'
   : typeof navigator !== 'undefined' && /^mac/i.test(navigator.platform) ? '访达' : '文件管理器';
+/* the system's trash, by its name there */
+const TRASH = typeof navigator !== 'undefined' && /^win/i.test(navigator.platform) ? '回收站'
+  : typeof navigator !== 'undefined' && /^mac/i.test(navigator.platform) ? '废纸篓' : '回收站';
 
 export const zhCN: Words = {
   nav: {
@@ -56,9 +59,9 @@ export const zhCN: Words = {
     noneInstalled: '还没有安装。去这里找 OpenFilm 的：',
     fromAgent: '来自 {name}',
     agentHint: '智能体自己的，开启后才会用。',
-    removeTitle: '把「{name}」移到废纸篓？',
-    removeHint: '智能体不会再用它。需要时可以从废纸篓放回来。',
-    remove: '移到废纸篓',
+    removeTitle: `把「{name}」移到${TRASH}？`,
+    removeHint: `智能体不会再用它。需要时可以从${TRASH}放回来。`,
+    remove: `移到${TRASH}`,
     tryNow: '试一试',
     tryOff: '开启后才能试',
     details: '详情',
@@ -180,8 +183,8 @@ export const zhCN: Words = {
     folderNamePlaceholder: '文件夹名称',
     renameFolder: '重命名文件夹',
     deleteFolder: '删除文件夹',
-    deleteFolderHint: '删除此文件夹，并将其中的 {n} 个项目移到废纸篓，你可以从那里找回。',
-    deleteFolderHintOne: '删除此文件夹，并将其中的项目移到废纸篓，你可以从那里找回。',
+    deleteFolderHint: `删除此文件夹，并将其中的 {n} 个项目移到${TRASH}，你可以从那里找回。`,
+    deleteFolderHintOne: `删除此文件夹，并将其中的项目移到${TRASH}，你可以从那里找回。`,
     deleteFolderHintEmpty: '删除此文件夹。其中没有项目。',
     renameTaken: '“{name}”已被占用：已有同名文件夹。请换一个名称。',
     moveToTitle: '移动「{name}」',
@@ -683,12 +686,12 @@ export const zhCN: Words = {
     commit: '提交',
     discard: '放弃改动',
     discardTitle: '放弃所有未提交的改动？',
-    discardBody: '影片会回到最近一次提交。之后新加的文件会移到废纸篓。',
+    discardBody: `影片会回到最近一次提交。之后新加的文件会移到${TRASH}。`,
     historyOf: '提交记录 · {branch}',
     restore: '恢复到这个版本',
     restoreTitle: '恢复到「{name}」？',
     restoreBody: '影片会变回这个版本，作为未提交的改动出现：提交就保留下来，放弃就回到现在。',
-    restoreDirtyBody: '你还有未提交的改动。恢复会先放弃它们（之后新加的文件会移到废纸篓）。',
+    restoreDirtyBody: `你还有未提交的改动。恢复会先放弃它们（之后新加的文件会移到${TRASH}）。`,
     restoreDiscard: '放弃并恢复',
     restoreConfirm: '恢复',
     restoredMessage: '回到「{name}」',
@@ -781,9 +784,9 @@ export const zhCN: Words = {
     renameKind: '“{from}”不能重命名为“{to}”：扩展名表明了文件的类型，这样改会改变它。请保留同类的扩展名。',
     delete: '删除',
     deleteConfirmTitle: '删除此素材？',
-    deleteConfirm: '它会被移到废纸篓，你可以从那里找回。',
-    deleteAlsoClip: '它会被移到废纸篓，你可以从那里找回。时间轴上使用它的片段也会被移除。',
-    deleteAlsoClips: '它会被移到废纸篓，你可以从那里找回。时间轴上使用它的 {n} 个片段也会被移除。',
+    deleteConfirm: `它会被移到${TRASH}，你可以从那里找回。`,
+    deleteAlsoClip: `它会被移到${TRASH}，你可以从那里找回。时间轴上使用它的片段也会被移除。`,
+    deleteAlsoClips: `它会被移到${TRASH}，你可以从那里找回。时间轴上使用它的 {n} 个片段也会被移除。`,
     deleteFailed: '无法删除',
     extractAudio: '提取音频为新文件',
     extractAudioFailed: '无法从该视频中提取声音',
@@ -860,9 +863,9 @@ export const zhCN: Words = {
     moveHere: "已经在这里",
     deleteMany: "删除 {n} 项",
     deleteManyTitle: "删除这 {n} 项？",
-    deleteManyConfirm: "它们会被移到废纸篓，你可以从那里找回。",
-    deleteManyAlsoClip: "它们会被移到废纸篓，你可以从那里找回。时间轴上使用其中一项的片段也会被移除。",
-    deleteManyAlsoClips: "它们会被移到废纸篓，你可以从那里找回。时间轴上使用它们的 {n} 个片段也会被移除。",
+    deleteManyConfirm: `它们会被移到${TRASH}，你可以从那里找回。`,
+    deleteManyAlsoClip: `它们会被移到${TRASH}，你可以从那里找回。时间轴上使用其中一项的片段也会被移除。`,
+    deleteManyAlsoClips: `它们会被移到${TRASH}，你可以从那里找回。时间轴上使用它们的 {n} 个片段也会被移除。`,
     importFiles: "导入文件…",
     importFilesNote: "复制一份到项目里",
     linkFiles: "链接文件…",
@@ -1479,9 +1482,9 @@ export const zhCN: Words = {
   confirm: {
     ok: '确认',
     deleteTitle: '删除此项目？',
-    deleteDesc: '它的文件夹，连同影片和其中的所有内容，都会被移到废纸篓。',
+    deleteDesc: `它的文件夹，连同影片和其中的所有内容，都会被移到${TRASH}。`,
     deleteManyTitle: '删除这 {n} 个项目？',
-    deleteManyDesc: '它们的文件夹，连同影片和其中的所有内容，都会被移到废纸篓。',
+    deleteManyDesc: `它们的文件夹，连同影片和其中的所有内容，都会被移到${TRASH}。`,
     delete: '删除',
     cancel: '取消',
   },

@@ -3,6 +3,9 @@ import type { Words } from './words.ts';
 /** what the system's file manager is called here */
 const FILES = typeof navigator !== 'undefined' && /^win/i.test(navigator.platform) ? 'el Explorador de archivos'
   : typeof navigator !== 'undefined' && /^mac/i.test(navigator.platform) ? 'el Finder' : 'el gestor de archivos';
+/* the system's trash, by its name there */
+const TRASH = typeof navigator !== 'undefined' && /^win/i.test(navigator.platform) ? 'la Papelera de reciclaje'
+  : typeof navigator !== 'undefined' && /^mac/i.test(navigator.platform) ? 'la Papelera' : 'la papelera';
 
 export const es: Words = {
   nav: {
@@ -55,9 +58,9 @@ export const es: Words = {
     noneInstalled: 'Aún no hay ninguna. Encuentra las de OpenFilm en',
     fromAgent: 'De {name}',
     agentHint: 'Las de tu agente. Desactivadas hasta que actives una.',
-    removeTitle: '¿Mover «{name}» a la papelera?',
-    removeHint: 'Los agentes dejarán de usarla. Puedes recuperarla de la papelera.',
-    remove: 'Mover a la papelera',
+    removeTitle: `¿Mover «{name}» a ${TRASH}?`,
+    removeHint: `Los agentes dejarán de usarla. Puedes recuperarla de ${TRASH}.`,
+    remove: `Mover a ${TRASH}`,
     tryNow: 'Probar',
     tryOff: 'Actívala para probarla',
     details: 'Detalles',
@@ -179,8 +182,8 @@ export const es: Words = {
     folderNamePlaceholder: 'Nombre de la carpeta',
     renameFolder: 'Cambiar nombre de la carpeta',
     deleteFolder: 'Eliminar carpeta',
-    deleteFolderHint: 'Elimina la carpeta y mueve los {n} proyectos que contiene a la Papelera, desde donde puedes recuperarlos.',
-    deleteFolderHintOne: 'Elimina la carpeta y mueve el proyecto que contiene a la Papelera, desde donde puedes recuperarlo.',
+    deleteFolderHint: `Elimina la carpeta y mueve los {n} proyectos que contiene a ${TRASH}, desde donde puedes recuperarlos.`,
+    deleteFolderHintOne: `Elimina la carpeta y mueve el proyecto que contiene a ${TRASH}, desde donde puedes recuperarlo.`,
     deleteFolderHintEmpty: 'Elimina la carpeta. No contiene ningún proyecto.',
     renameTaken: '“{name}” ya está en uso: ya hay una carpeta con ese nombre. Elige otro.',
     moveToTitle: 'Mover «{name}»',
@@ -682,12 +685,12 @@ export const es: Words = {
     commit: 'Confirmar',
     discard: 'Descartar cambios',
     discardTitle: '¿Descartar todos los cambios sin confirmar?',
-    discardBody: 'La película vuelve a su última confirmación. Los archivos añadidos desde entonces van a la Papelera.',
+    discardBody: `La película vuelve a su última confirmación. Los archivos añadidos desde entonces van a ${TRASH}.`,
     historyOf: 'Historial · {branch}',
     restore: 'Restaurar esta versión',
     restoreTitle: '¿Restaurar “{name}”?',
     restoreBody: 'La película pasa a ser esta versión, como cambios sin confirmar: confírmalos para quedártela o descártalos para volver.',
-    restoreDirtyBody: 'Tienes cambios sin confirmar. Restaurar los descarta primero (los archivos añadidos van a la Papelera).',
+    restoreDirtyBody: `Tienes cambios sin confirmar. Restaurar los descarta primero (los archivos añadidos van a ${TRASH}).`,
     restoreDiscard: 'Descartar y restaurar',
     restoreConfirm: 'Restaurar',
     restoredMessage: 'Vuelta a “{name}”',
@@ -780,9 +783,9 @@ export const es: Words = {
     renameKind: '“{from}” no se puede renombrar como “{to}”: la extensión indica qué es un archivo, y esta la cambiaría. Mantén una extensión del mismo tipo.',
     delete: 'Eliminar',
     deleteConfirmTitle: '¿Eliminar este recurso?',
-    deleteConfirm: 'Se mueve a la Papelera, desde donde puedes recuperarlo.',
-    deleteAlsoClip: 'Se mueve a la Papelera, desde donde puedes recuperarlo. También se quita el clip que lo usa en la línea de tiempo.',
-    deleteAlsoClips: 'Se mueve a la Papelera, desde donde puedes recuperarlo. También se quitan los {n} clips que lo usan en la línea de tiempo.',
+    deleteConfirm: `Se mueve a ${TRASH}, desde donde puedes recuperarlo.`,
+    deleteAlsoClip: `Se mueve a ${TRASH}, desde donde puedes recuperarlo. También se quita el clip que lo usa en la línea de tiempo.`,
+    deleteAlsoClips: `Se mueve a ${TRASH}, desde donde puedes recuperarlo. También se quitan los {n} clips que lo usan en la línea de tiempo.`,
     deleteFailed: 'No se pudo eliminar',
     extractAudio: 'Extraer el audio como archivo nuevo',
     extractAudioFailed: 'No se pudo extraer el sonido de ese video',
@@ -859,9 +862,9 @@ export const es: Words = {
     moveHere: "Ya está aquí",
     deleteMany: "Eliminar {n} elementos",
     deleteManyTitle: "¿Eliminar {n} elementos?",
-    deleteManyConfirm: "Se mueven a la Papelera, desde donde puedes recuperarlos.",
-    deleteManyAlsoClip: "Se mueven a la Papelera, desde donde puedes recuperarlos. También se quita el clip que usa uno de ellos en la línea de tiempo.",
-    deleteManyAlsoClips: "Se mueven a la Papelera, desde donde puedes recuperarlos. También se quitan los {n} clips que los usan en la línea de tiempo.",
+    deleteManyConfirm: `Se mueven a ${TRASH}, desde donde puedes recuperarlos.`,
+    deleteManyAlsoClip: `Se mueven a ${TRASH}, desde donde puedes recuperarlos. También se quita el clip que usa uno de ellos en la línea de tiempo.`,
+    deleteManyAlsoClips: `Se mueven a ${TRASH}, desde donde puedes recuperarlos. También se quitan los {n} clips que los usan en la línea de tiempo.`,
     importFiles: "Importar archivos…",
     importFilesNote: "Se copia en el proyecto",
     linkFiles: "Vincular archivos…",
@@ -1478,9 +1481,9 @@ export const es: Words = {
   confirm: {
     ok: 'Confirmar',
     deleteTitle: '¿Eliminar este proyecto?',
-    deleteDesc: 'Su carpeta, con la película y todo lo que contiene, se mueve a la Papelera.',
+    deleteDesc: `Su carpeta, con la película y todo lo que contiene, se mueve a ${TRASH}.`,
     deleteManyTitle: '¿Eliminar estos {n} proyectos?',
-    deleteManyDesc: 'Sus carpetas, con las películas y todo lo que contienen, se mueven a la Papelera.',
+    deleteManyDesc: `Sus carpetas, con las películas y todo lo que contienen, se mueven a ${TRASH}.`,
     delete: 'Eliminar',
     cancel: 'Cancelar',
   },
