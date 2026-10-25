@@ -143,6 +143,7 @@ export const zhCN: Words = {
     agentSection: '智能体',
     agentSetUp: '设置',
     agentWaiting: '正在登录…',
+    agentWas: '这段对话原来用的是 {name}，现在用不了，下一条消息会发给下面选的智能体。',
     effort: '思考强度',
     filesFailed: '{names} 添加失败：{error} 移除后再发送。',
     filesPending: '文件还在添加中。',

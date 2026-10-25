@@ -66,6 +66,8 @@ import { agentModelSummary, agentOptions, currentAgent, effectivePrefs, offeredO
 import { useLiveActivityFromStore } from '@/lib/live-activity';
 import { loadLastSession, loadSessions, newSession, saveLastSession, saveSessions } from '@/lib/local-sessions';
 import type { ProjectSessionItem } from '@/lib/project-sessions';
+import { conversationAgent, conversationPrefs, keptPrefs } from '@/lib/conversation-agent';
+import { AGENT_DEFINITIONS, isAgentId } from '../../src/agent-definitions.mjs';
 import type { TranscriptItem } from '@/lib/agent-transcript';
 import { app, type FfmpegState, type Project, type SkillListing, type StudioRef, type StudioSelection } from './app-bridge';
 import { Divider } from './components/Divider';
@@ -251,7 +253,23 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
   /* ── the agent ── */
   const la = useLocalAgents();
   React.useEffect(() => { la.hydrate(); void la.refresh(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  const agent = currentAgent(la);
+  /* the agent this conversation used and its options, whatever was picked since in another one; a new conversation
+     takes the one picked last (lib/conversation-agent). A conversation from before they kept it: its last turn's agent */
+  const shownSessionItem = sessions.find((s) => s.id === sessionId);
+  const lastTurnAgent = asset?.sessionId === sessionId ? asset.localAgent?.id : undefined;
+  const usedAgent = [shownSessionItem?.agent, lastTurnAgent].find((id): id is LocalAgentId => Boolean(id) && isAgentId(id));
+  const { agent, was: agentWas } = conversationAgent(usedAgent, la.roster, currentAgent(la));
+  const agentPrefs = conversationPrefs(la.prefs, shownSessionItem?.agentPrefs);
+  /** the agent or an option changed in the menu: kept on this conversation, once it has said something (a new one
+      takes the pick); not a use of it, so it keeps its place in the list */
+  const keepOnSession = React.useCallback((patch: (s: ProjectSessionItem) => Partial<ProjectSessionItem>) => {
+    setSessions((list) => {
+      if (!list.some((s) => s.id === sessionId && s.turns > 0)) return list;
+      const out = list.map((s) => (s.id === sessionId ? { ...s, ...patch(s) } : s));
+      saveSessions(projectKey, out);
+      return out;
+    });
+  }, [projectKey, sessionId]);
 
   /* what an agent's command asks before it spends: above the composer, as the agent's own questions are */
   const spendAsks = React.useSyncExternalStore((change) => app.asks.onChange(change), app.asks.get);
@@ -580,8 +598,10 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
     const shown = conversation === shownSession.current;
     const turn = createLocalAgentTurn(id, agent, ordered.length);
     const agentStore = useLocalAgents.getState();
-    const options = agentOptions(agentStore, agent);
-    const prefs = effectivePrefs(agentStore.prefs, agent, agentStore.roster, options);
+    const own = sessions.find((s) => s.id === sessionId)?.agentPrefs;
+    const picked = conversationPrefs(agentStore.prefs, own);
+    const options = agentOptions({ ...agentStore, prefs: picked }, agent);
+    const prefs = effectivePrefs(picked, agent, agentStore.roster, options);
     const summary = agentModelSummary(options, prefs);
     /* how hard it thinks, as the menu offers it */
     const effortOption = options?.find((o) => o.category === 'thought_level');
@@ -597,7 +617,12 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
     if (shown) setTurns((list) => mergeAssetLists([started], list));
     /* the conversation is named by the words: a reference reads as its name there, not as "[1: name]" */
     const title = instruction.replace(/\[\d+: ([^\]]*)\]/g, '$1').replace(/\s+/g, ' ').trim().slice(0, 80);
-    touchSession(sessionId, (s) => ({ title: s.title || title, turns: s.turns + 1 }));
+    /* the agent and the model and effort it ran on, kept on the conversation: it goes on with them when opened again.
+       A turn the agent started by itself keeps no options: the person chose none there */
+    touchSession(sessionId, (s) => ({
+      title: s.title || title, turns: s.turns + 1, agent,
+      ...(origin ? {} : { agentPrefs: { ...s.agentPrefs, [agent]: { ...s.agentPrefs?.[agent], ...keptPrefs(options, prefs) } } }),
+    }));
     const meta: LocalAgentTurnMeta = {
       turnId: id, projectId: projectKey, projectTitle: project.name, sessionId, agent, prompt: instruction,
       turnNo: ordered.length, startedAt: Date.now(), turn: started,
@@ -768,9 +793,16 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
   );
 
   const agentName = agent === 'byok' ? t('composer.agentOwnKey') : la.roster?.find((a) => a.id === agent)?.name ?? agent;
+  const wasName = agentWas === 'byok' ? t('composer.agentOwnKey') : agentWas ? la.roster?.find((a) => a.id === agentWas)?.name ?? AGENT_DEFINITIONS[agentWas]?.name ?? agentWas : '';
 
   const editComposerCard = (
     <div className="flex flex-col gap-1">
+      {/* the agent this conversation used cannot be used now: the next message goes to the one picked below */}
+      {agentWas ? (
+        <div className="flex items-center gap-2 rounded-[10px] border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1.5 text-[12px] text-[var(--text-muted)]">
+          <span className="min-w-0 flex-1">{t('composer.agentWas').replace('{name}', wasName)}</span>
+        </div>
+      ) : null}
       {contextFull ? (
         <div className="flex items-center gap-2 rounded-[10px] border border-[var(--border)] bg-[var(--surface-2)] py-1.5 pl-3 pr-1.5 text-[12px] text-[var(--text-muted)]">
           <span className="min-w-0 flex-1">{t('composer.contextFull')}</span>
@@ -907,7 +939,14 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
         </div>
       </div>
       <div className="flex items-center gap-0.5 px-0.5">
-        <ModelPopover placement="top" align="start" />
+        <ModelPopover
+          placement="top"
+          align="start"
+          agent={agent}
+          prefs={agentPrefs}
+          onPick={(id) => keepOnSession(() => ({ agent: id }))}
+          onPref={(id, configId, value) => keepOnSession((s) => ({ agentPrefs: { ...s.agentPrefs, [id]: { ...s.agentPrefs?.[id], [configId]: value } } }))}
+        />
         <div className="min-w-0 flex-1" />
         <input
           ref={attachInputRef}

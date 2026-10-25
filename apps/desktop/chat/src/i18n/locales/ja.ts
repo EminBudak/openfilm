@@ -143,6 +143,7 @@ export const ja: Words = {
     agentSection: 'エージェント',
     agentSetUp: '設定',
     agentWaiting: 'サインイン中…',
+    agentWas: 'この会話は {name} を使っていましたが、今は使えません。次のメッセージは下で選んだエージェントに送られます。',
     effort: '思考レベル',
     filesFailed: '{names} を追加できませんでした：{error} 削除してから送信してください。',
     filesPending: 'ファイルを追加しています。',

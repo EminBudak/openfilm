@@ -143,6 +143,7 @@ export const es: Words = {
     agentSection: 'Agente',
     agentSetUp: 'Configurar',
     agentWaiting: 'Iniciando sesión…',
+    agentWas: 'Esta conversación usaba {name}, que ahora no está disponible. El siguiente mensaje irá al agente de abajo.',
     effort: 'Esfuerzo',
     filesFailed: 'No se pudo adjuntar {names}: {error} Quítalo para enviar.',
     filesPending: 'Los archivos aún se están adjuntando.',

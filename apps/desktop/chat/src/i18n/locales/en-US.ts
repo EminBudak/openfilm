@@ -143,6 +143,7 @@ export const enUS = {
     agentSection: 'Agent',
     agentSetUp: 'Set up',
     agentWaiting: 'Signing in…',
+    agentWas: 'This conversation used {name}, which isn’t available now. The next message goes to the agent below.',
     effort: 'Effort',
     filesFailed: 'Couldn\'t attach {names}: {error} Remove it to send.',
     filesPending: 'The files are still being attached.',

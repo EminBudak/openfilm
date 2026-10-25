@@ -139,6 +139,7 @@ export const ko: Words = {
     agentSection: '에이전트',
     agentSetUp: '설정',
     agentWaiting: '로그인하는 중…',
+    agentWas: '이 대화는 {name}을(를) 사용했지만 지금은 사용할 수 없습니다. 다음 메시지는 아래에서 선택한 에이전트로 전송됩니다.',
     effort: '추론 강도',
     filesFailed: '{names}을(를) 추가하지 못했습니다: {error} 제거한 뒤 보내세요.',
     filesPending: '파일을 추가하는 중입니다.',

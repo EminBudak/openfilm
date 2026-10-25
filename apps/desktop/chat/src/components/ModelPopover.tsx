@@ -59,7 +59,18 @@ export function ChatAgentIcon({ id, size = 14 }: { id: LocalAgentId; size?: numb
   return <AgentIcon id={id} size={size} />;
 }
 
-export function ModelPopover({ placement = 'bottom', align = 'start' }: { placement?: 'top' | 'bottom'; align?: 'start' | 'end' } = {}) {
+/**
+ * The composer's agent menu. In a conversation, `agent` and `prefs` are the ones it goes on with (lib/conversation-agent),
+ * and `onPick` and `onPref` keep a change on it too; without them, the agent and options picked last.
+ */
+export function ModelPopover({ placement = 'bottom', align = 'start', agent: conversationAgent, prefs: conversationPrefs, onPick, onPref }: {
+  placement?: 'top' | 'bottom';
+  align?: 'start' | 'end';
+  agent?: LocalAgentId;
+  prefs?: Partial<Record<LocalAgentId, Record<string, unknown>>>;
+  onPick?: (agent: LocalAgentId) => void;
+  onPref?: (agent: LocalAgentId, configId: string, value: unknown) => void;
+} = {}) {
   const t = useT();
   const [open, setOpen] = React.useState(false);
   /** the option whose side menu is open */
@@ -90,7 +101,7 @@ export function ModelPopover({ placement = 'bottom', align = 'start' }: { placem
   const la = useLocalAgents();
   const { hydrate, refresh, ensureOptions } = la;
   React.useEffect(() => { hydrate(); }, [hydrate]);
-  const agent = currentAgent(la);
+  const agent = conversationAgent ?? currentAgent(la);
   const shown = shownAgents(la.roster);
   const ready = (id: LocalAgentId) => shown.find((a) => a.id === id)?.status === 'ready';
   React.useEffect(() => { if (ready(agent)) void ensureOptions(agent); });
@@ -101,8 +112,9 @@ export function ModelPopover({ placement = 'bottom', align = 'start' }: { placem
     });
   }, [open, refresh, ensureOptions]);
 
-  const options = agentOptions(la, agent);
-  const prefs = effectivePrefs(la.prefs, agent, la.roster, options);
+  const picked = conversationPrefs ?? la.prefs;
+  const options = agentOptions({ ...la, prefs: picked }, agent);
+  const prefs = effectivePrefs(picked, agent, la.roster, options);
   const rows = options ? menuOptions(options, t('composer.optionDefault')).filter((o) => offeredOption(agent, la.roster, o)) : [];
   const summary = agentModelSummary(options, prefs);
   const triggerModel = summary.model;
@@ -122,7 +134,7 @@ export function ModelPopover({ placement = 'bottom', align = 'start' }: { placem
   };
   const chooseAgent = (a: RosterAgent) => {
     setSide(null);
-    if (a.status === 'ready') { la.pick(a.id); return; }
+    if (a.status === 'ready') { la.pick(a.id); onPick?.(a.id); return; }
     if (a.status === 'checking' || a.status === 'waiting') return;
     /* not connected, signed out, not found, no key: set up in Settings → Agents, where connecting and signing in are */
     setOpen(false);
@@ -133,7 +145,7 @@ export function ModelPopover({ placement = 'bottom', align = 'start' }: { placem
   const choosing = side ? rows.find((o) => o.id === side) : undefined;
   const chosenValue = (o: Option) => (o.fixed ? o.options![0]!.value : optionValue(options, prefs, o.id));
   /* a fixed row's one value is already the one in use */
-  const pickChoice = (o: Option, value: unknown) => { if (!o.fixed) la.setPref(agent, o.id, value); };
+  const pickChoice = (o: Option, value: unknown) => { if (!o.fixed) { la.setPref(agent, o.id, value); onPref?.(agent, o.id, value); } };
 
   /* the side menu beside its row: on the right of the card, the card sliding left when the window is too narrow for
      both, and over the card's right edge only when it cannot slide far enough; measured again once it is drawn */
