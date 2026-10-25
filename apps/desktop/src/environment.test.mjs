@@ -1,10 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
-  childEnvironment, environmentCache, expandWindowsVars, lastPathSource, loginShellVariables, macProxy, noProxyList, parseRegQuery,
-  parseScutilProxy, proxyVariables, regQuery, registryVariables, shellSubset, shellVariables, windowsFreshPath, windowsProxy, withSystemProxy,
+  childEnvironment, environmentCache, expandWindowsVars, lastPathSource, loginShellVariables, macProxy, mergePath,
+  nodeVersionDirs, noProxyList, parseRegQuery, parseScutilProxy, proxyVariables, registryVariables, regQuery,
+  shellSubset, shellVariables, windowsFreshPath, windowsProxy, withSystemProxy,
 } from './environment.mjs';
 
 const PROFILE = ['C:', 'Users', 'someone'].join('\\');
@@ -153,6 +156,33 @@ test("the agents get all the person's shell sets, but what the shell and its ter
   assert.deepEqual(Object.keys(all).sort(), ['ANTHROPIC_BASE_URL', 'GITHUB_TOKEN', 'HTTPS_PROXY', 'NODE_EXTRA_CA_CERTS', 'PATH']);
   assert.ok(all.PATH.startsWith('/opt/homebrew/bin:/usr/bin'));
   assert.deepEqual(Object.keys(shellSubset(all, '/home/me/')).sort(), ['HTTPS_PROXY', 'PATH']);
+});
+
+test("each Node a version manager installed is searched, newest first: nvm's, fnm's and mise's; on Windows fnm's", () => {
+  const home = mkdtempSync(join(tmpdir(), 'of-nodes-'));
+  const dir = (...p) => { mkdirSync(join(home, ...p), { recursive: true }); return join(home, ...p); };
+  const nvm18 = dir('.nvm', 'versions', 'node', 'v18.20.4', 'bin');
+  const nvm22 = dir('.nvm', 'versions', 'node', 'v22.1.0', 'bin');
+  const nvm9 = dir('.nvm', 'versions', 'node', 'v9.11.2', 'bin');
+  dir('.nvm', 'versions', 'node', 'system');
+  const fnm = dir('Library', 'Application Support', 'fnm', 'node-versions', 'v20.3.0', 'installation', 'bin');
+  const mise = dir('.local', 'share', 'mise', 'installs', 'node', '24.0.1', 'bin');
+  assert.deepEqual(nodeVersionDirs(home, { win: false }), [nvm22, nvm18, nvm9, fnm, mise]);
+  /* fnm on Windows: no bin folder, the commands sit beside node.exe */
+  const winFnm = dir('Roaming', 'fnm', 'node-versions', 'v20.3.0', 'installation');
+  assert.deepEqual(nodeVersionDirs(home, { win: true, env: { APPDATA: join(home, 'Roaming'), LOCALAPPDATA: join(home, 'Local') } }), [winFnm]);
+  assert.deepEqual(nodeVersionDirs(home, { win: true, env: { FNM_DIR: join(home, 'elsewhere'), APPDATA: join(home, 'Roaming') } }), [], "FNM_DIR is fnm's only folder");
+});
+
+test("with the login shell giving nothing, the PATH still has the version managers' folders, after the usual ones", { skip: process.platform === 'win32' }, () => {
+  const home = mkdtempSync(join(tmpdir(), 'of-nodes-'));
+  const nvm = join(home, '.nvm', 'versions', 'node', 'v22.1.0', 'bin');
+  const volta = join(home, '.volta', 'bin');
+  for (const d of [nvm, volta]) mkdirSync(d, { recursive: true });
+  const dirs = mergePath('', home).split(':');
+  assert.ok(dirs.indexOf('/usr/bin') < dirs.indexOf(volta) && dirs.indexOf(volta) < dirs.indexOf(nvm), dirs.join(':'));
+  assert.ok(!dirs.includes(join(home, '.asdf', 'shims')), 'a manager not installed adds nothing');
+  assert.equal(mergePath('/mine/bin', home).split(':')[0], '/mine/bin', "the shell's own PATH comes first");
 });
 
 const SCUTIL = `<dictionary> {

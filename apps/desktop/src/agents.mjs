@@ -264,8 +264,12 @@ function run(cmd, args, timeoutMs = 10_000, { cwd, env, options } = {}) {
   });
 }
 
-/* one word of a cmd.exe command line: quoted when it has to be */
-const winArg = (a) => (/^[\w.:\\/=+@-]+$/.test(a) ? a : `"${String(a).replace(/"/g, '""')}"`);
+/**
+ * One word of a cmd.exe command line: quoted when it has to be. cmd.exe expands `%NAME%` inside quotes too, so each `%`
+ * is closed out of the quotes and escaped (`"^%"`): the program is given the word as it was, with no variable's value
+ * in it.
+ */
+export const winArg = (a) => (/^[\w.:\\/=+@-]+$/.test(a) ? a : `"${String(a).replace(/"/g, '""').replace(/%/g, '"^%"')}"`);
 
 /** The app's own Node running a script, through as-node.mjs: what the script starts does not run Electron as Node. */
 const AS_NODE = fileURLToPath(new URL('./as-node.mjs', import.meta.url));
@@ -1114,8 +1118,8 @@ export class AgentSession {
 
     const script = harness ? fileURLToPath(new URL('./pi-agent.mjs', import.meta.url)) : native ? null : adapterScript(this.spec.adapter);
     this.child = native
-      ? spawn(native.cmd, native.args, { ...native.options, cwd: this.opts.cwd, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
-      : spawn(node.command, node.env.ELECTRON_RUN_AS_NODE ? asNode(script) : [script], { cwd: this.opts.cwd, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+      ? spawn(native.cmd, native.args, { ...native.options, ...OWN_GROUP, cwd: this.opts.cwd, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
+      : spawn(node.command, node.env.ELECTRON_RUN_AS_NODE ? asNode(script) : [script], { ...OWN_GROUP, cwd: this.opts.cwd, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     this.child.stderr.on('data', (d) => { this.stderr = (this.stderr + String(d)).slice(-16_000); });
     LIVE.add(this);
     this.child.once('exit', (code) => { LIVE.delete(this); this.exited = { code }; this.opts.onExit?.({ code, stderr: this.stderr }); });
@@ -1320,9 +1324,33 @@ export class AgentSession {
   close() {
     LIVE.delete(this);
     try { this.conn?.close(); } catch { /* gone already */ }
-    if (this.child && this.child.exitCode === null) this.child.kill('SIGTERM');
+    stopTree(this.child);
     this.logging?.close();
   }
+}
+
+/**
+ * An agent's process and what it starts (the program under its adapter, its MCP servers, a command it runs) as one:
+ * a process group of its own on macOS and Linux. On Windows taskkill follows the tree instead.
+ */
+export const OWN_GROUP = windows ? {} : { detached: true };
+
+/**
+ * Stop a process started with OWN_GROUP and everything it started. Stopping it alone (the adapter, or cmd.exe in front
+ * of a .cmd) left the agent's own program and its MCP servers running, on Windows always.
+ */
+export function stopTree(child, { win = windows } = {}) {
+  if (!child?.pid || child.exitCode !== null || child.signalCode !== null) return;
+  if (win) {
+    try {
+      const taskkill = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'taskkill.exe');
+      spawn(taskkill, ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }).once('error', () => child.kill());
+      return;
+    } catch { /* taskkill could not start: the process alone, below */ }
+  } else {
+    try { process.kill(-child.pid, 'SIGTERM'); return; } catch { /* not a group of its own: the process alone, below */ }
+  }
+  try { child.kill('SIGTERM'); } catch { /* gone already */ }
 }
 
 /** Every agent process this app started and has not closed: a chat's, or one opened only to ask. */

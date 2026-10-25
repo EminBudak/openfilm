@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { AgentSession, CLIENT_CAPABILITIES, agentDefaults, closeEverySession, planProblem, probeFolder, CODEX_UTF8_CMD, agentShell, allowOption, codexDeveloperInstructions, codexLaunchEnv, distinctOptions, errorCause, legacyOptions, powerShellScript, powerShellLine, powerShellWindowLaunch, terminalScript, checkAgentProgram, readAgentStatus, setChosenPaths, signInScript, turnError, signInError, codexTooOld, AGENTS, ownSignIn, codexServiceError, codexRefusal, codexNotice, explainFailure, stderrReason, withToolKind } from './agents.mjs';
+import { AgentSession, CLIENT_CAPABILITIES, agentDefaults, closeEverySession, planProblem, probeFolder, CODEX_UTF8_CMD, agentShell, allowOption, codexDeveloperInstructions, codexLaunchEnv, distinctOptions, errorCause, legacyOptions, powerShellScript, powerShellLine, powerShellWindowLaunch, terminalScript, checkAgentProgram, readAgentStatus, setChosenPaths, signInScript, turnError, signInError, codexTooOld, AGENTS, ownSignIn, codexServiceError, codexRefusal, codexNotice, explainFailure, stderrReason, withToolKind, OWN_GROUP, stopTree, winArg } from './agents.mjs';
+import { spawn } from 'node:child_process';
 
 test('an agent that asks: yes for good where it offers that, else yes this once; nothing to say yes with is null', () => {
   const options = [
@@ -535,4 +536,38 @@ test("a script the app's own Node starts runs as the main module, without ELECTR
   const bin = join(mkdtempSync(join(tmpdir(), 'of-main-')), 'bin.mjs');
   writeFileSync(bin, "if (import.meta.main) console.log(`0.2.1 ${process.env.ELECTRON_RUN_AS_NODE ?? 'clean'} ${process.argv.slice(2).join(' ')}`);\n");
   assert.deepEqual(await checkAgentProgram('deepseek', bin), { ok: true, path: bin, version: '0.2.1 clean --version' });
+});
+
+test("closing an agent stops what it started too: its own program under the adapter, its MCP servers", async () => {
+  /* an adapter (the child) that starts the agent's program (the grandchild) and says its pid */
+  const adapter = `const c = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+    console.log(c.pid); setInterval(() => {}, 1000);`;
+  const child = spawn(process.execPath, ['-e', adapter], { ...OWN_GROUP, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+  const grandchild = Number(await new Promise((done) => child.stdout.once('data', (d) => done(String(d).trim()))));
+  const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  assert.ok(alive(grandchild));
+  const exited = new Promise((done) => child.once('exit', done));
+  stopTree(child);
+  await exited;
+  for (let i = 0; i < 50 && alive(grandchild); i += 1) await new Promise((done) => setTimeout(done, 100));
+  assert.equal(alive(grandchild), false, 'the program under the adapter is stopped with it');
+  stopTree(child);
+});
+
+test("a word for cmd.exe keeps its % as it is: no variable's value is put in its place", async () => {
+  assert.equal(winArg('C:\\Users\\someone\\codex.cmd'), 'C:\\Users\\someone\\codex.cmd');
+  assert.equal(winArg('open film'), '"open film"');
+  assert.equal(winArg('say "hi"'), '"say ""hi"""');
+  assert.equal(winArg('50% of %PATH%'), '"50"^%" of "^%"PATH"^%""');
+  if (process.platform !== 'win32') return;
+  const { spawnSync } = await import('node:child_process');
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  /* a shim as npm writes one: it hands its words on to a program, which says what it was given */
+  const shim = join(mkdtempSync(join(tmpdir(), 'of shim ')), 'echo.cmd');
+  writeFileSync(shim, `@"${process.execPath}" -e "console.log(JSON.stringify(process.argv.slice(1)))" %*\r\n`);
+  const words = ['50% of %PATH%', 'open "film"', '%USERNAME%'];
+  const r = spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', `"${[shim, ...words].map(winArg).join(' ')}"`], { encoding: 'utf8', windowsVerbatimArguments: true, windowsHide: true });
+  assert.deepEqual(JSON.parse(r.stdout.trim()), words);
 });

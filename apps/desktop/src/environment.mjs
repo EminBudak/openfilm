@@ -14,6 +14,7 @@
  * can use it.
  */
 import { execFile, spawn } from 'node:child_process';
+import { existsSync, readdirSync } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 
@@ -45,15 +46,52 @@ function accountShell() {
   try { return userInfo().shell || null; } catch { return null; }
 }
 
-/** Directories searched even when the login shell gives nothing usable. */
+/** A folder's subfolders named as versions (18.20.4, v22.1.0), newest first. */
+function versionsIn(root) {
+  let names;
+  try { names = readdirSync(root); } catch { return []; }
+  const parts = (name) => /^v?(\d+)\.(\d+)\.(\d+)$/.exec(name)?.slice(1).map(Number) ?? null;
+  return names.filter(parts).sort((a, b) => {
+    const [x, y] = [parts(a), parts(b)];
+    return y[0] - x[0] || y[1] - x[1] || y[2] - x[2];
+  });
+}
+
+/**
+ * The folder of each Node a version manager installed, newest first, where `npm i -g` puts an agent's command: nvm's,
+ * fnm's and mise's (on Windows fnm's, in %FNM_DIR%, %APPDATA% or %LOCALAPPDATA%). Only the shell's own files put one on
+ * the PATH, so with the login shell not answering (on Windows fnm sets it in each terminal, never in the registry) an
+ * agent installed there was not found.
+ */
+export function nodeVersionDirs(home = homedir(), { win = windows, env = process.env } = {}) {
+  const fnm = (root) => ({ root: join(root, 'node-versions'), sub: win ? ['installation'] : ['installation', 'bin'] });
+  const roots = win
+    ? (env.FNM_DIR ? [env.FNM_DIR] : [env.APPDATA, env.LOCALAPPDATA].filter(Boolean).map((d) => join(d, 'fnm'))).map(fnm)
+    : [
+      { root: join(home, '.nvm', 'versions', 'node'), sub: ['bin'] },
+      ...[join(home, '.local', 'share', 'fnm'), join(home, 'Library', 'Application Support', 'fnm'), join(home, '.fnm')].map(fnm),
+      { root: join(home, '.local', 'share', 'mise', 'installs', 'node'), sub: ['bin'] },
+    ];
+  return roots.flatMap(({ root, sub }) => versionsIn(root).map((v) => join(root, v, ...sub))).filter((d) => existsSync(d));
+}
+
+/**
+ * Directories searched even when the login shell gives nothing usable: the usual ones, the shims of version managers
+ * and package managers that install commands in the home folder (Volta, asdf, mise, Bun, pnpm, npm's own prefix), and
+ * each Node a version manager installed.
+ */
 export function fallbackPathDirs(home = homedir()) {
-  return [join(home, '.local', 'bin'), '/opt/homebrew/bin', '/opt/homebrew/sbin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'];
+  const managed = [join(home, '.volta', 'bin'), join(home, '.asdf', 'shims'), join(home, '.local', 'share', 'mise', 'shims'), join(home, '.bun', 'bin'),
+    join(home, 'Library', 'pnpm'), join(home, '.local', 'share', 'pnpm'), join(home, '.npm-global', 'bin'), join(home, '.nodenv', 'shims')].filter((d) => existsSync(d));
+  return [join(home, '.local', 'bin'), '/opt/homebrew/bin', '/opt/homebrew/sbin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin',
+    ...managed, ...nodeVersionDirs(home, { win: false })];
 }
 
 /** The login shell's PATH first, then the fallback directories it lacks; relative and repeated entries dropped. */
 export function mergePath(primary, home = homedir()) {
   if (windows) {
-    const dirs = [...String(primary ?? '').split(';'), join(home, '.local', 'bin'), ...(process.env.APPDATA ? [join(process.env.APPDATA, 'npm')] : [])].filter((d) => d && isAbsolute(d));
+    const dirs = [...String(primary ?? '').split(';'), join(home, '.local', 'bin'), ...(process.env.APPDATA ? [join(process.env.APPDATA, 'npm')] : []),
+      ...nodeVersionDirs(home, { win: true })].filter((d) => d && isAbsolute(d));
     return [...new Map(dirs.map((d) => [d.toLowerCase(), d])).values()].join(';');
   }
   const dirs = [...String(primary ?? '').split(':'), ...fallbackPathDirs(home)].filter((d) => d && isAbsolute(d));
