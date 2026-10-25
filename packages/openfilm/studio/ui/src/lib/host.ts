@@ -105,7 +105,7 @@ export interface StudioHost {
      * One of the person's own models set up (no `id`) or changed: checked before it is kept. A key left empty keeps its
      * own, or takes the one of another model on the same address.
      */
-    saveOwnModel: (config: HostOwnModelConfig) => Promise<{ ok: true; id: string } | { ok: false; error: string; code?: string }>;
+    saveOwnModel: (config: HostOwnModelConfig) => Promise<{ ok: true; id: string } | { ok: false; error: string; code?: string; url?: string; status?: number; reason?: string }>;
     removeOwnModel: (id: string) => Promise<unknown>;
     /**
      * The MCP servers the person added to an agent themselves (its maker's not among them), each let into the app or

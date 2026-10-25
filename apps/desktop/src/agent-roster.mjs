@@ -174,7 +174,8 @@ export function probeRequest(format, baseUrl, key, model) {
 /**
  * Whether a model reads pictures: one request with a picture in it, in the format's own shape. Resolves `{ ok }` or the
  * service's own words for what went wrong (a model that cannot take pictures is said so, and so is a web page where the
- * API should be).
+ * API should be). The app's own words come with a `code`, and the `url`, `status` or `reason` they name, so Studio's
+ * Settings say them in the person's language (its settings.agents.ownErrors); the service's own words have none.
  * @param {{ format: string, baseUrl: string, key: string, model: string, fetch?: typeof fetch }} o
  */
 export async function probeModel({ format, baseUrl, key, model, fetch: fetchImpl = fetch }) {
@@ -183,7 +184,8 @@ export async function probeModel({ format, baseUrl, key, model, fetch: fetchImpl
   try {
     res = await fetchImpl(req.url, { method: 'POST', headers: req.headers, body: JSON.stringify(req.body), signal: AbortSignal.timeout(60_000) });
   } catch (e) {
-    return { ok: false, error: `The service could not be reached: ${e instanceof Error ? e.message : String(e)}` };
+    const reason = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: `The service could not be reached: ${reason}`, code: 'unreachable', reason };
   }
   /* a web page answers an address that is a site's, not an API's (or a sign-in page in front of one), whatever its status */
   const page = /text\/html/i.test(res.headers.get('content-type') ?? '');
@@ -192,11 +194,12 @@ export async function probeModel({ format, baseUrl, key, model, fetch: fetchImpl
   let message = body;
   try { message = JSON.parse(body)?.error?.message ?? body; } catch { /* not JSON */ }
   message = String(message).slice(0, 300);
-  if (res.status === 401 || res.status === 403) return { ok: false, error: 'The service did not accept this key.' };
-  if (page || /^\s*</.test(body)) return { ok: false, error: `${req.url} answers with a web page (${res.status}), not the API: check the address and the API format.` };
+  if (res.status === 401 || res.status === 403) return { ok: false, error: 'The service did not accept this key.', code: 'key-refused' };
+  if (page || /^\s*</.test(body)) return { ok: false, error: `${req.url} answers with a web page (${res.status}), not the API: check the address and the API format.`, code: 'web-page', url: req.url, status: res.status };
   if (/image|vision|multimodal|modalit/i.test(message)) return { ok: false, error: 'This model cannot read pictures, and the agent has to look at its frames: choose one that does.', code: 'no-images' };
-  if (res.status === 404 && !/model/i.test(message)) return { ok: false, error: `Nothing answers at ${req.url}: check the address and the API format.` };
-  return { ok: false, error: message || `The service answered ${res.status}.` };
+  if (res.status === 404 && !/model/i.test(message)) return { ok: false, error: `Nothing answers at ${req.url}: check the address and the API format.`, code: 'nothing-there', url: req.url };
+  if (message) return { ok: false, error: message };
+  return { ok: false, error: `The service answered ${res.status}.`, code: 'answered', status: res.status };
 }
 
 /**
@@ -418,23 +421,23 @@ export function createRoster(deps) {
      * none), its API format, the service's address, the model asked for there, its key, its efforts (pi-config.mjs
      * EFFORTS: the ones it takes and the one it starts on) and its context length (none: 128K). A key left empty keeps
      * the one it has, or takes the key of another model on the same address. Checked first (the key is taken, the
-     * model reads pictures).
+     * model reads pictures). What went wrong comes with a code, as probeModel's does.
      * @param {{ id?: string, name?: string, format: string, baseUrl?: string, model: string, key?: string, levels?: string[], effort?: string, context?: number }} config
-     * @returns {Promise<{ ok: true, id: string } | { ok: false, error: string, code?: string }>}
+     * @returns {Promise<{ ok: true, id: string } | { ok: false, error: string, code?: string, url?: string, status?: number, reason?: string }>}
      */
     async saveOwnModel(config) {
       const format = BYOK_FORMATS[config?.format];
-      if (!format) return { ok: false, error: 'Choose the API format.' };
+      if (!format) return { ok: false, error: 'Choose the API format.', code: 'no-format' };
       const baseUrl = String(config.baseUrl || format.baseUrl).trim().replace(/\/+$/, '');
-      if (!keyAddress(baseUrl)) return { ok: false, error: 'The address has to start with https:// (or http:// for one on this computer).' };
+      if (!keyAddress(baseUrl)) return { ok: false, error: 'The address has to start with https:// (or http:// for one on this computer).', code: 'address' };
       const model = String(config.model ?? '').trim();
-      if (!model) return { ok: false, error: 'Name the model.' };
+      if (!model) return { ok: false, error: 'Name the model.', code: 'no-model' };
       const models = choices.byok?.models ?? [];
       const before = config.id ? models.find((m) => m.id === config.id) : null;
-      if (config.id && !before) return { ok: false, error: 'That model is no longer set up.' };
+      if (config.id && !before) return { ok: false, error: 'That model is no longer set up.', code: 'model-gone' };
       const sameService = models.find((m) => m.id !== config.id && m.baseUrl === baseUrl && keyOf(m.id));
       const key = String(config.key ?? '').trim() || (before ? keyOf(before.id) : null) || (sameService ? keyOf(sameService.id) : null);
-      if (!key) return { ok: false, error: 'Paste the key.' };
+      if (!key) return { ok: false, error: 'Paste the key.', code: 'no-key' };
       const probe = await probeModel({ format: config.format, baseUrl, key, model, fetch: deps.fetch });
       if (!probe.ok) return probe;
       let id = before?.id;

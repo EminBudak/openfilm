@@ -23,7 +23,7 @@ import { Check, Copy, Download, KeyRound, Loader2, Plus, X } from 'lucide-react'
 import { useLanguage, useT } from '@/i18n';
 import { BYOK_EFFORTS, studioHost, type HostAgent, type HostAgentDiagnosis, type HostAgentId, type HostAgentUsage, type HostByokEffort, type HostByokEffortLevel, type HostByokFormat, type HostOwnModel } from '@/lib/host';
 import { parseContextLength } from '@/lib/context-length';
-import { accountOrg, missingActions } from '@/lib/agent-row';
+import { accountOrg, missingActions, ownModelError } from '@/lib/agent-row';
 
 /** What is left of the plan: what Codex can say (the app's agent-usage.mjs; Claude Code's own report is wrong for Team accounts). */
 const PLAN_AGENTS: readonly HostAgentId[] = ['codex'];
@@ -515,7 +515,7 @@ function OwnModelForm({ model, models, onDone }: { model?: HostOwnModel; models:
     if (!host || !ready) return;
     setState({ busy: true, error: null });
     void host.saveOwnModel({ ...(model ? { id: model.id } : {}), name, format, baseUrl, model: modelId, ...(key.trim() ? { key } : {}), levels: effort.levels, effort: effort.effort, ...context })
-      .then((r) => { if (r.ok) onDone(); else setState({ busy: false, error: r.error || t('settings.agents.failed') }); })
+      .then((r) => { if (r.ok) onDone(); else setState({ busy: false, error: ownModelError(r, t) || t('settings.agents.failed') }); })
       .catch((e: unknown) => setState({ busy: false, error: e instanceof Error ? e.message : String(e) }));
   };
   const keyHint = model ? t('settings.agents.keyKept').replace('{last4}', model.last4)

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { accountOrg, missingActions } from './agent-row.ts';
+import { accountOrg, missingActions, ownModelError } from './agent-row.ts';
+import { zhCN } from '../i18n/zh-CN.ts';
 
 test('an agent not found offers Locate and its installer, or its install page', () => {
   const host = { locate: true, install: true };
@@ -18,4 +19,13 @@ test("an account's organization is named unless it only repeats the email, as a 
   assert.equal(accountOrg({ org: 'Acme Films', email: 'me@example.test' }), 'Acme Films');
   assert.equal(accountOrg({ org: "me@example.test's Organization" }), "me@example.test's Organization");
   assert.equal(accountOrg({ email: 'me@example.test' }), null);
+});
+
+test("an own model not saved is said in the person's language, with the address, status or reason; the service's own words as they are", () => {
+  const t = (path: string) => path.split('.').reduce<unknown>((at, part) => (at as Record<string, unknown> | undefined)?.[part], zhCN) as string | undefined ?? path;
+  assert.equal(ownModelError({ error: 'in English', code: 'web-page', url: 'https://example.test/v1/responses', status: 405 }, t), 'https://example.test/v1/responses 返回的是网页（405），不是 API：请检查地址和 API 格式。');
+  assert.equal(ownModelError({ error: 'in English', code: 'unreachable', reason: 'fetch failed' }, t), '连不上这个服务：fetch failed');
+  assert.equal(ownModelError({ error: 'in English', code: 'no-key' }, t), '请粘贴密钥。');
+  assert.equal(ownModelError({ error: 'Unknown parameter: max_output_tokens' }, t), 'Unknown parameter: max_output_tokens');
+  assert.equal(ownModelError({ error: 'from a newer app', code: 'something-new' }, t), 'from a newer app');
 });

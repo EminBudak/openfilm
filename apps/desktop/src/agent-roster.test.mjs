@@ -4,6 +4,8 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRoster, keyAddress, probeRequest, readChoices } from './agent-roster.mjs';
+import { LANGUAGES as STUDIO_LANGUAGES } from '../../../packages/openfilm/studio/ui/src/i18n/index.ts';
+import { ownModelError } from '../../../packages/openfilm/studio/ui/src/lib/agent-row.ts';
 
 const roster = (dataDir, fetch, extra = {}) => createRoster({
   dataDir,
@@ -81,6 +83,53 @@ test('a key goes over https://, or over http:// only to this computer; another h
   const r = roster(mkdtempSync(join(tmpdir(), 'of-roster-')), async () => { asked++; return new Response('{}', { status: 200 }); });
   assert.match((await r.saveOwnModel({ format: 'responses', baseUrl: 'http://example.com/v1', model: 'test', key: 'x' })).error, /https:\/\//);
   assert.equal(asked, 0, 'the key was not sent');
+});
+
+test('the app\'s own words for a model not set up come with a code and what they name, for Settings to say in the person\'s language; the service\'s own words with none', async () => {
+  let answer = { status: 401, type: 'application/json', body: '{}' };
+  let reached = true;
+  const fetch = async () => {
+    if (!reached) throw new TypeError('fetch failed');
+    return new Response(answer.body, { status: answer.status, headers: { 'content-type': answer.type } });
+  };
+  const r = roster(mkdtempSync(join(tmpdir(), 'of-roster-')), fetch);
+  const failures = [];
+  /** what comes with the words: the code, and the address, status or reason they name */
+  const said = async (config = {}) => {
+    const failure = await r.saveOwnModel({ format: 'responses', baseUrl: 'https://api.example.com/v1', model: 'm', key: 'sk-1', ...config });
+    failures.push(failure);
+    const { ok, error, ...rest } = failure;
+    assert.equal(ok, false);
+    assert.ok(error, 'in English too');
+    return rest;
+  };
+  assert.deepEqual(await said({ format: 'soap' }), { code: 'no-format' });
+  assert.deepEqual(await said({ baseUrl: 'http://example.com/v1' }), { code: 'address' });
+  assert.deepEqual(await said({ model: ' ' }), { code: 'no-model' });
+  assert.deepEqual(await said({ id: 'gone' }), { code: 'model-gone' });
+  assert.deepEqual(await said({ key: '' }), { code: 'no-key' });
+  assert.deepEqual(await said(), { code: 'key-refused' });
+  answer = { status: 502, type: 'text/html', body: '<html></html>' };
+  assert.deepEqual(await said(), { code: 'web-page', url: 'https://api.example.com/v1/responses', status: 502 });
+  answer = { status: 404, type: 'application/json', body: '{}' };
+  assert.deepEqual(await said(), { code: 'nothing-there', url: 'https://api.example.com/v1/responses' });
+  answer = { status: 500, type: 'text/plain', body: '' };
+  assert.deepEqual(await said(), { code: 'answered', status: 500 });
+  reached = false;
+  assert.deepEqual(await said(), { code: 'unreachable', reason: 'fetch failed' });
+  reached = true;
+  answer = { status: 400, type: 'application/json', body: JSON.stringify({ error: { message: 'Unknown parameter: max_output_tokens' } }) };
+  assert.deepEqual(await r.saveOwnModel({ format: 'responses', baseUrl: 'https://api.example.com/v1', model: 'm', key: 'sk-1' }), { ok: false, error: 'Unknown parameter: max_output_tokens' });
+  /* Studio's Settings has words for each code: in English the app's own, in every other language their own */
+  answer = { status: 400, type: 'application/json', body: JSON.stringify({ error: { message: 'image input is not supported' } }) };
+  assert.equal((await said()).code, 'no-images');
+  for (const { code, words } of STUDIO_LANGUAGES) {
+    const t = (path) => path.split('.').reduce((at, part) => at?.[part], words) ?? path;
+    for (const failure of failures) {
+      if (code === 'en') assert.equal(ownModelError(failure, t), failure.error, failure.code);
+      else assert.notEqual(ownModelError(failure, t), failure.error, `${code}: ${failure.code}`);
+    }
+  }
 });
 
 test('each model is its own service with its own key; a key left empty is the one of another model on that address', async () => {
