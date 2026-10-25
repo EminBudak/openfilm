@@ -23,6 +23,8 @@ let root, scratch;
 before(() => {
   scratch = mkdtempSync(join(tmpdir(), 'of-exports-'));
   process.env.OPENFILM_EXPORTS = join(scratch, 'Exports');
+  /* the problems the failing exports here record go to this home's log, not to the person's (Studio's report reads it) */
+  process.env.OPENFILM_HOME = join(scratch, 'home');
   root = join(scratch, 'Tiny');
   mkdirSync(join(root, 'assets', 'audio', 'sfx'), { recursive: true });
   mkdirSync(join(root, 'assets', 'audio', 'music'), { recursive: true });
