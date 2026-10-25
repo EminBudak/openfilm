@@ -23,7 +23,7 @@ import { Check, Copy, Download, KeyRound, Loader2, Plus, X } from 'lucide-react'
 import { useLanguage, useT } from '@/i18n';
 import { BYOK_EFFORTS, studioHost, type HostAgent, type HostAgentDiagnosis, type HostAgentId, type HostAgentUsage, type HostByokEffort, type HostByokEffortLevel, type HostByokFormat, type HostOwnModel } from '@/lib/host';
 import { parseContextLength } from '@/lib/context-length';
-import { missingActions } from '@/lib/agent-row';
+import { accountOrg, missingActions } from '@/lib/agent-row';
 
 /** What is left of the plan: what Codex can say (the app's agent-usage.mjs; Claude Code's own report is wrong for Team accounts). */
 const PLAN_AGENTS: readonly HostAgentId[] = ['codex'];
@@ -190,7 +190,7 @@ export function AgentsSection() {
     const how = a.method === 'chatgpt' ? t('settings.agents.accountChatgpt') : a.method === 'api-key' ? t('settings.agents.accountApiKey')
       : a.method === 'console' ? t('settings.agents.accountConsole') : null;
     const plan = a.plan ? a.plan.charAt(0).toUpperCase() + a.plan.slice(1) : null;
-    const parts = [a.org, a.email, plan, a.email || a.org ? null : how].filter(Boolean);
+    const parts = [accountOrg(a), a.email, plan, a.email || a.org ? null : how].filter(Boolean);
     return parts.length ? parts.join(' · ') : null;
   };
 
