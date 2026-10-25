@@ -133,6 +133,19 @@ function writeChoices(dataDir, choices) {
   writeFileSync(join(dataDir, 'agents.json'), `${JSON.stringify(choices, null, 2)}\n`);
 }
 
+/**
+ * Whether a key may be sent to `baseUrl`: over https://, or over http:// only to this computer (localhost, 127.x.x.x,
+ * ::1), where it crosses no network in the clear.
+ */
+export function keyAddress(baseUrl) {
+  if (/\s/.test(baseUrl)) return false;
+  let url;
+  try { url = new URL(baseUrl); } catch { return false; }
+  if (url.protocol === 'https:') return true;
+  const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  return url.protocol === 'http:' && (host === 'localhost' || host.endsWith('.localhost') || host === '::1' || /^127(\.\d{1,3}){3}$/.test(host));
+}
+
 /** One request, in the format's own shape, carrying a picture. */
 export function probeRequest(format, baseUrl, key, model) {
   const base = baseUrl.replace(/\/+$/, '');
@@ -413,7 +426,7 @@ export function createRoster(deps) {
       const format = BYOK_FORMATS[config?.format];
       if (!format) return { ok: false, error: 'Choose the API format.' };
       const baseUrl = String(config.baseUrl || format.baseUrl).trim().replace(/\/+$/, '');
-      if (!/^https?:\/\/[^\s]+$/.test(baseUrl)) return { ok: false, error: 'The address has to start with https:// (or http:// for one on this computer).' };
+      if (!keyAddress(baseUrl)) return { ok: false, error: 'The address has to start with https:// (or http:// for one on this computer).' };
       const model = String(config.model ?? '').trim();
       if (!model) return { ok: false, error: 'Name the model.' };
       const models = choices.byok?.models ?? [];

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createRoster, probeRequest, readChoices } from './agent-roster.mjs';
+import { createRoster, keyAddress, probeRequest, readChoices } from './agent-roster.mjs';
 
 const roster = (dataDir, fetch, extra = {}) => createRoster({
   dataDir,
@@ -68,6 +68,19 @@ test('an address that answers with a web page is said so, not shown as its HTML,
   answer = { status: 502, type: 'text/plain', body: '<html><body>Bad gateway</body></html>' };
   assert.match((await save()).error, /web page \(502\)/);
   assert.equal(readChoices(dir).byok, null, 'nothing kept');
+});
+
+test('a key goes over https://, or over http:// only to this computer; another http:// address is refused before any request', async () => {
+  for (const ok of ['https://api.example.com/v1', 'http://localhost:11434/v1', 'http://127.0.0.1:1234', 'http://[::1]:8080/v1', 'http://models.localhost/v1']) {
+    assert.equal(keyAddress(ok), true, ok);
+  }
+  for (const no of ['http://example.com/v1', 'http://192.168.1.20:11434/v1', 'http://localhost.example.com', 'ftp://127.0.0.1', 'https://api.example.com/v 1', 'api.example.com']) {
+    assert.equal(keyAddress(no), false, no);
+  }
+  let asked = 0;
+  const r = roster(mkdtempSync(join(tmpdir(), 'of-roster-')), async () => { asked++; return new Response('{}', { status: 200 }); });
+  assert.match((await r.saveOwnModel({ format: 'responses', baseUrl: 'http://example.com/v1', model: 'test', key: 'x' })).error, /https:\/\//);
+  assert.equal(asked, 0, 'the key was not sent');
 });
 
 test('each model is its own service with its own key; a key left empty is the one of another model on that address', async () => {
