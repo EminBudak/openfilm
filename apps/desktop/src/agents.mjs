@@ -969,7 +969,8 @@ export function legacyOptions(session) {
  * Config options with each choice once: an agent may list the same value twice (GitHub Copilot's model list has
  * "Auto" twice), which the menu would show twice, both ticked. The first of each is kept; anything else as it was.
  * Choices in groups (DeepSeek Harness groups its models by where they run: its API, the person's DeepSeek account)
- * are listed one after another, each named with its group's name.
+ * are listed one after another, each named by itself, then its group's name ("DeepSeek-V4-Pro · DeepSeek Account"):
+ * the menu's button shows the part before the dot, the model.
  */
 export function distinctOptions(configOptions) {
   if (!Array.isArray(configOptions)) return configOptions;
@@ -977,7 +978,7 @@ export function distinctOptions(configOptions) {
     if (!Array.isArray(o?.options)) return o;
     const seen = new Set();
     const choices = o.options.flatMap((c) => (Array.isArray(c?.options) && !('value' in c)
-      ? c.options.map((g) => (g && typeof c.name === 'string' && c.name ? { ...g, name: `${c.name} · ${g.name}` } : g))
+      ? c.options.map((g) => (g && typeof c.name === 'string' && c.name ? { ...g, name: `${g.name} · ${c.name}` } : g))
       : [c]));
     return { ...o, options: choices.filter((c) => !c || !('value' in c) || (!seen.has(c.value) && seen.add(c.value))) };
   });

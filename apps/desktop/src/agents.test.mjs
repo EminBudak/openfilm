@@ -35,7 +35,7 @@ test('a choice an agent lists twice shows once in the menu', () => {
   assert.equal(distinctOptions(null), null);
 });
 
-test("choices an agent lists in groups show one after another, each with its group's name", () => {
+test("choices an agent lists in groups show one after another, each named by itself, then its group's name: the model first", () => {
   /* DeepSeek Harness 0.2.0 groups its models by where they run */
   const [model, effort] = distinctOptions([
     { id: 'model', currentValue: '["deepseek-official","deepseek-v4-flash"]', options: [
@@ -45,8 +45,8 @@ test("choices an agent lists in groups show one after another, each with its gro
     { id: 'reasoning_effort', currentValue: 'high', options: [{ value: 'high', name: 'High' }] },
   ]);
   assert.deepEqual(model.options, [
-    { value: '["deepseek-official","deepseek-v4-flash"]', name: 'DeepSeek · deepseek-v4-flash' },
-    { value: '["deepseek-account","deepseek-flash"]', name: 'DeepSeek Account · DeepSeek-V41-Flash', description: 'Fast' },
+    { value: '["deepseek-official","deepseek-v4-flash"]', name: 'deepseek-v4-flash · DeepSeek' },
+    { value: '["deepseek-account","deepseek-flash"]', name: 'DeepSeek-V41-Flash · DeepSeek Account', description: 'Fast' },
   ]);
   assert.deepEqual(effort.options, [{ value: 'high', name: 'High' }]);
 });
