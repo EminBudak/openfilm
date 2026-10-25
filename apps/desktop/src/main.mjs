@@ -615,7 +615,7 @@ async function start() {
     dataDir: DATA,
     localAgents: listAgents,
     localAgent,
-    openSignIn: openAgentSignIn,
+    openSignIn: (id) => openAgentSignIn(id, { track: true }),
     /* an agent's official installer, in a terminal window, once the person agreed to it in Settings → Agents */
     openInstaller: openAgentInstaller,
     /* sessions closed on connecting and disconnecting: the next look at its usage is for whichever account is used now */
@@ -638,6 +638,7 @@ async function start() {
   });
   agentHandle('desktop:agents:list', () => { void roster.refresh(); return roster.list(); });
   agentHandle('desktop:agents:connect', ({ id }) => roster.connect(String(id)));
+  agentHandle('desktop:agents:cancel-sign-in', ({ id }) => { roster.cancelSignIn(String(id)); return { ok: true }; });
   agentHandle('desktop:agents:disconnect', ({ id }) => { roster.disconnect(String(id)); return { ok: true }; });
   /* what is left of Claude Code's and Codex's plan, on OpenFilm's sign-in (agent-usage.mjs); null when it can't say */
   agentHandle('desktop:agents:usage', ({ id, fresh }) => agentUsage(String(id), { fresh: fresh === true }));

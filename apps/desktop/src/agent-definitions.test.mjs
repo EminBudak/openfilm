@@ -18,6 +18,7 @@ test('the desktop definitions cover exactly the existing launchers and discovery
     assert.equal(new URL(AGENT_DOWNLOADS[id]).protocol, 'https:');
   }
   assert.equal(AGENT_DEFINITIONS.byok.install, null);
+  assert.equal(AGENT_DEFINITIONS.deepseek.install, 'https://www.deepseek.com/harness/');
 });
 
 test('the roster and installation API keep their existing metadata exports', () => {

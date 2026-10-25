@@ -49,7 +49,6 @@ import {
   Link2Off,
   Mic,
   SeparatorVertical,
-  TextCursor,
   BetweenHorizontalStart,
   ArrowLeftToLine,
   ArrowRightToLine,
@@ -558,6 +557,8 @@ export interface TimelineProps {
   onReferBlocks?: (blocks: TimelineBlock[]) => void;
   /** The range marked on the ruler (the editor keeps it): drawn as a band across the tracks. */
   range?: FilmRange | null;
+  /** A range recalled from the chat: a quiet, temporary highlight, separate from the editing selection. */
+  flashRange?: FilmRange | null;
   /**
    * What the app's chat points at (lib/chat-marks): the clip, track or span of the pill hovered there, lit; and the
    * clips of the message being written, each with its number.
@@ -574,11 +575,6 @@ export interface TimelineProps {
    * It is about the clips selected, the range marked or the point picked on the ruler, whichever was picked last.
    */
   selectionBar?: boolean;
-  /**
-   * The bar's first button, "Add to chat": the clips selected and the range marked (either, or both), or the moment
-   * at the playhead (`atMs`) for a point picked on the ruler. Without it the bar has no such button.
-   */
-  onReferSelection?: (what: { blocks: readonly TimelineBlock[]; range: FilmRange | null; atMs: number | null }) => void;
   /**
    * With the app's chat: the ruler points at time for it with ⌘ (Ctrl on Windows) held, as a box is drawn on the
    * picture. A ⌘-click there is that moment, a ⌘-drag that span, each one a pill in the chat. A plain click or drag
@@ -602,12 +598,6 @@ export interface TimelineProps {
   onScrubPreview: (ms: number) => void;
   /** On release, once: settle. */
   onScrubCommit: (ms: number) => void;
-  /**
-   * The preview axis (a switch in the toolbar): the picture at the moment under the pointer while it
-   * moves over the tracks, the playhead staying where it is; null: back to the playhead's picture. Without it there is
-   * no preview axis.
-   */
-  onHoverPreview?: (ms: number | null) => void;
   /** A single seek: the keyboard. */
   onSeek: (ms: number) => void;
   /** Delete a clip from film.html. Null = done. */
@@ -743,11 +733,10 @@ export interface TimelineCommands {
   unlink: () => void;
   /** [ / ]: every clip before / after the playhead selected (lib/timeline-nav sideTargets). */
   selectSide: (dir: -1 | 1) => void;
-  /** The switches (see lib/timeline-prefs): the main-track magnet, snapping, linkage, the preview axis. */
+  /** The switches (see lib/timeline-prefs): the main-track magnet, snapping and linkage. */
   toggleMagnet: () => void;
   toggleSnap: () => void;
   toggleLinkage: () => void;
-  togglePreviewAxis: () => void;
   /**
    * ⌘B: split the selected clips at the playhead; with nothing selected, the clip under it on the main track, else on
    * the targeted track (the one last pressed), else on the topmost track seen. The clips linked to them go too.
@@ -938,12 +927,12 @@ export const Timeline = React.memo(function Timeline({
   trackMenuExtra,
   onReferBlocks,
   range,
+  flashRange,
   chat,
   onHoverBlock,
   onRangeChange,
   rangeRef,
   selectionBar = false,
-  onReferSelection,
   onReferRuler,
   onDuplicate,
   onPlayRange,
@@ -953,7 +942,6 @@ export const Timeline = React.memo(function Timeline({
   playing,
   onScrubPreview,
   onScrubCommit,
-  onHoverPreview,
   onSeek,
   onRemove,
   onRemoveMany,
@@ -1039,7 +1027,7 @@ export const Timeline = React.memo(function Timeline({
   };
 
   const [zoom, setZoom] = React.useState(ZOOM_DEFAULT);
-  /* the switches (the main-track magnet, snapping, linkage, the preview axis); kept on this machine */
+  /* the switches (the main-track magnet, snapping and linkage); kept on this machine */
   const prefs = useTimelinePrefs();
   const snap = prefs.snap;
   const prefsRef = React.useRef(prefs);
@@ -1455,6 +1443,17 @@ export const Timeline = React.memo(function Timeline({
     if (!el || !(pxPerMs > 0)) return;
     el.scrollLeft = Math.max(0, fromMs * pxPerMs);
   }, [pxPerMs]);
+
+  /* A recalled span outside the view is brought into sight at the current zoom, without seeking. */
+  React.useEffect(() => {
+    const el = scrollRef.current;
+    if (!flashRange || !el || !(pxPerMs > 0)) return;
+    const from = flashRange.startMs * pxPerMs;
+    const to = flashRange.endMs * pxPerMs;
+    if (to < el.scrollLeft || from > el.scrollLeft + el.clientWidth) {
+      panViewTo(flashRange.startMs - el.clientWidth / pxPerMs * 0.1);
+    }
+  }, [flashRange, pxPerMs, panViewTo]);
 
   /* Ctrl/⌘ + wheel (and pinch) zooms around the pointer. A native non-passive listener: React's onWheel is passive and
      cannot stop the browser's page zoom. Horizontal swipes and Shift+wheel scroll here too: the track area hides its
@@ -1901,6 +1900,8 @@ export const Timeline = React.memo(function Timeline({
    * that moment, a ⌘-drag that span, drawn as it is pulled. Without ⌘ it scrubs.
    */
   const [referDraft, setReferDraft] = React.useState<FilmRange | null>(null);
+  const stopRefer = React.useRef<(() => void) | null>(null);
+  React.useEffect(() => () => { stopRefer.current?.(); }, []);
   /* where the pointer is on the ruler (film ms) while ⌘ is held, shown as the moment a click would refer */
   const [rulerHoverMs, setRulerHoverMs] = React.useState<number | null>(null);
   /* the pointer's x over the ruler, so ⌘ pressed or let go there shows or hides that moment without a move */
@@ -1933,6 +1934,8 @@ export const Timeline = React.memo(function Timeline({
   const startRefer = React.useCallback((e: React.PointerEvent) => {
     if (e.button !== 0 || !playable || !onReferRuler) return;
     e.preventDefault();
+    stopRefer.current?.();
+    document.body.classList.add('tl-pinning');
     const startX = e.clientX;
     const at = (clientX: number) => Math.max(0, Math.min(totalMs, msAtClientX(clientX)));
     const fromMs = at(e.clientX);
@@ -1948,18 +1951,28 @@ export const Timeline = React.memo(function Timeline({
       if (!raf) raf = requestAnimationFrame(flush);
       edge.at(ev.clientX);
     };
-    const up = (ev: PointerEvent) => {
+    const stop = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', stop);
+      window.removeEventListener('blur', stop);
       edge.stop();
       if (raf) cancelAnimationFrame(raf);
       setReferDraft(null);
+      document.body.classList.remove('tl-pinning');
+      stopRefer.current = null;
+    };
+    const up = (ev: PointerEvent) => {
       const range = orderedRange(fromMs, at(ev.clientX));
+      stop();
       if (!dragged) onReferRuler({ atMs: fromMs });
       else if (range) onReferRuler({ range });
     };
+    stopRefer.current = stop;
     window.addEventListener('pointermove', move, { passive: true });
     window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', stop);
+    window.addEventListener('blur', stop);
   }, [msAtClientX, onReferRuler, playable, totalMs]);
 
   /**
@@ -2007,39 +2020,6 @@ export const Timeline = React.memo(function Timeline({
     }
     return out;
   }, [mode, tracks]);
-
-  /* ── the preview axis: a line under the pointer, the picture there; the playhead stays ── */
-  const axisRef = React.useRef<HTMLDivElement | null>(null);
-  const axisAt = React.useRef<number | null>(null);
-  const axisFrame = React.useRef(0);
-  const hoverPreviewRef = React.useRef(onHoverPreview);
-  hoverPreviewRef.current = onHoverPreview;
-  /** The axis at a moment (null: gone, the picture back at the playhead). Written to the DOM, told once a frame. */
-  const showAxis = React.useCallback((ms: number | null) => {
-    const line = axisRef.current;
-    if (line) {
-      line.style.opacity = ms == null ? '0' : '1';
-      if (ms != null) line.style.transform = `translateX(${Math.round(ms * laidPxRef.current - scrollLeftRef.current + PLAYHEAD_BLEED)}px)`;
-    }
-    if (axisAt.current === ms) return;
-    axisAt.current = ms;
-    if (axisFrame.current) return;
-    axisFrame.current = requestAnimationFrame(() => {
-      axisFrame.current = 0;
-      hoverPreviewRef.current?.(axisAt.current);
-    });
-  }, []);
-  React.useEffect(() => () => { if (axisFrame.current) cancelAnimationFrame(axisFrame.current); }, []);
-  /* not while playing, nor with a button held (a drag, a scrub, a marquee): then the picture is theirs */
-  const aimAxis = React.useCallback((e: React.PointerEvent) => {
-    if (!prefsRef.current.previewAxis || !hoverPreviewRef.current || playing || e.buttons || inHandRef.current) {
-      if (axisAt.current != null) showAxis(null);
-      return;
-    }
-    showAxis(Math.max(0, Math.min(totalMs, msAtClientX(e.clientX))));
-  }, [playing, totalMs, msAtClientX, showAxis]);
-  /* turned off, or playing: the axis goes */
-  React.useEffect(() => { if ((!prefs.previewAxis || playing) && axisAt.current != null) showAxis(null); }, [prefs.previewAxis, playing, showAxis]);
 
   const bladeRef = React.useRef<HTMLDivElement | null>(null);
   const contentRef = React.useRef<HTMLDivElement | null>(null);
@@ -3450,7 +3430,6 @@ export const Timeline = React.memo(function Timeline({
       toggleMagnet: () => togglePref('magnet'),
       toggleSnap: () => togglePref('snap'),
       toggleLinkage: () => togglePref('linkage'),
-      togglePreviewAxis: () => togglePref('previewAxis'),
       split: () => {
         const atMs = timeMsRef.current;
         const found = splitTargets(tracks, selectedRef.current, atMs, targetLaneRef.current);
@@ -3798,13 +3777,6 @@ export const Timeline = React.memo(function Timeline({
     });
     return out;
   })();
-  /* first, always: the clips and the range, or the moment of the point */
-  const barLead = barKind && onReferSelection ? {
-    id: 'refer', label: t('selectionBar.addToChat'), icon: <MessageSquarePlus size={14} />, shortcut: keyHint('refer'),
-    onSelect: () => onReferSelection(barKind === 'point'
-      ? { blocks: [], range: null, atMs: timeMsRef.current }
-      : { blocks: selectedBlocks, range: range ?? null, atMs: null }),
-  } : null;
   const clipCount = selectedBlocks.length;
   const clipsWord = clipCount === 1 ? t('selectionBar.oneClip') : t('selectionBar.clips').replace('{n}', String(clipCount));
   const barLabel = barKind === 'point' || !clipCount ? undefined
@@ -3946,7 +3918,7 @@ export const Timeline = React.memo(function Timeline({
           ) : null}
         </div>
 
-        {/* the switches (lib/timeline-prefs), in this order: the main-track magnet, snapping, linkage, the preview axis */}
+        {/* the switches (lib/timeline-prefs), in this order: the main-track magnet, snapping and linkage */}
         {onEditOps ? <>
           <span data-timeline-magnet={prefs.magnet ? '1' : '0'}>
             <ToolButton onClick={() => togglePref('magnet')} active={prefs.magnet} label={t('timeline.magnet')}
@@ -3967,14 +3939,6 @@ export const Timeline = React.memo(function Timeline({
             </ToolButton>
           </span>
         </> : null}
-        {onHoverPreview ? (
-          <span data-timeline-preview-axis={prefs.previewAxis ? '1' : '0'}>
-            <ToolButton onClick={() => togglePref('previewAxis')} active={prefs.previewAxis} label={t('timeline.previewAxis')}
-              hint={prefs.previewAxis ? t('timeline.previewAxisOn') : t('timeline.previewAxisOff')}>
-              <TextCursor size={15} />
-            </ToolButton>
-          </span>
-        ) : null}
 
         <ToolButton
           onClick={() => zoomBy(1 / ZOOM_STEP)}
@@ -4108,7 +4072,7 @@ export const Timeline = React.memo(function Timeline({
               onBlur={() => setBarFocus((f) => (f === 'point' ? null : f))}
               className="relative h-full touch-none select-none outline-none"
               /* pointing at time for the chat (⌘ held): a crosshair, as on the picture, and the moment under it drawn */
-              style={{ width: trackPx, cursor: onReferRuler ? (rulerHoverMs == null && !referDraft ? 'col-resize' : 'crosshair') : 'col-resize' }}
+              style={{ width: trackPx, cursor: rulerHoverMs != null || referDraft ? 'crosshair' : 'default' }}
             >
               {tickMarks}
               {onReferRuler ? <RulerRefer hoverMs={rulerHoverMs} draft={referDraft} pxPerMs={pxPerMs} widthPx={trackPx} /> : null}
@@ -4118,7 +4082,7 @@ export const Timeline = React.memo(function Timeline({
           {subRowShown && subtitleRow ? (
             <SubtitleRow ref={subRowRef} spec={subtitleRow} pxPerMs={pxPerMs} scrollLeft={view.left} width={trackPx}
               playheadMs={() => timeMsRef.current} snap={snap} snapTargets={() => snapTargetsFor(allBlocks, null, timeMsRef.current)}
-              onError={setDropError} />
+              onScrub={startScrub} onError={setDropError} />
           ) : null}
 
           {/* the markers' row: pins along it, scrolling with the tracks; a press between them moves the playhead (and
@@ -4162,8 +4126,8 @@ export const Timeline = React.memo(function Timeline({
             /* capture phase: a press on the playhead line goes to the scrub before clips and marquee (grabPlayhead);
                move / leave only manage the cursor */
             onPointerDownCapture={grabPlayhead}
-            onPointerMove={(e) => { hotPlayhead(e); aimBlade(e); aimAxis(e); }}
-            onPointerLeave={() => { coldPlayhead(); hideBlade(); showAxis(null); }}
+            onPointerMove={(e) => { hotPlayhead(e); aimBlade(e); }}
+            onPointerLeave={() => { coldPlayhead(); hideBlade(); }}
             /* no rubber-band: a ruler that bounces makes people think they dragged wrong */
             className={`tl-scroll absolute inset-0 overflow-y-auto overflow-x-hidden overscroll-none bg-transparent${
               mode === 'split' ? ' tl-blade' : ''
@@ -4262,11 +4226,6 @@ export const Timeline = React.memo(function Timeline({
           className="pointer-events-none absolute inset-y-0 z-[35]"
           style={{ left: headW - PLAYHEAD_BLEED, right: 0, top: TOOLBAR_H, bottom: H_SCROLL_H, overflow: 'hidden' }}
         >
-          {/* the preview axis under the pointer (showAxis moves it): a thin line, quieter than the playhead */}
-          {onHoverPreview ? (
-            <div ref={axisRef} data-preview-axis="" aria-hidden className="absolute inset-y-0 left-0 w-px"
-              style={{ opacity: 0, background: 'var(--tl-faint)' }} />
-          ) : null}
           {/* moved with transform, not left: the most frequently moving thing here, and transform skips layout; a zoom
               gesture scales its layer (the knob keeps its width) */}
           <div data-zoom-layer="view" data-zoom-bleed={PLAYHEAD_BLEED} className="absolute inset-0">
@@ -4347,6 +4306,24 @@ export const Timeline = React.memo(function Timeline({
         </div>
       ) : null}
 
+      {/* Recalling a range briefly lights only the ruler, without a persistent selection or toolbar. */}
+      {flashRange && hasLanes ? (
+        <div className="pointer-events-none absolute z-[25] overflow-hidden" style={{ left: headW, right: 0, top: TOOLBAR_H, height: RULER_H }}>
+          <div data-zoom-layer="view" className="absolute inset-0">
+            <div
+              data-timeline-range-flash=""
+              className="absolute inset-y-0 left-0 border-x"
+              style={{
+                transform: `translate3d(${flashRange.startMs * pxPerMs - scrollLeft}px,0,0)`,
+                width: Math.max(1, (flashRange.endMs - flashRange.startMs) * pxPerMs),
+                borderColor: 'color-mix(in srgb, var(--tl-accent) 55%, transparent)',
+                background: 'color-mix(in srgb, var(--tl-accent) 10%, transparent)',
+              }}
+            />
+          </div>
+        </div>
+      ) : null}
+
       {/* the range marked on the ruler: a band from the ruler's top down through the tracks. It takes no pointer (the
           ruler scrubs and the clips under it are pressed as ever); its label does, and is dragged into the app's chat */}
       {shownRange && hasLanes ? (() => {
@@ -4400,8 +4377,7 @@ export const Timeline = React.memo(function Timeline({
       <SelectionToolbar
         selection={barKey}
         measure={measureBar}
-        hidden={playing || scrubbing || zooming || Boolean(marquee || rangeDraft || drag.preview || laneOrder || assetHint)}
-        lead={barLead}
+        hidden={playing || scrubbing || zooming || Boolean(marquee || rangeDraft || referDraft || drag.preview || laneOrder || assetHint)}
         {...(barLabel ? { label: barLabel } : {})}
         tools={barTools}
         ariaLabel={t('selectionBar.toolbar')}
@@ -4896,7 +4872,7 @@ function RulerRefer({ hoverMs, draft, pxPerMs, widthPx }: { hoverMs: number | nu
     const width = Math.max(1, (draft.endMs - draft.startMs) * pxPerMs);
     return (
       <div aria-hidden className="pointer-events-none absolute inset-0">
-        <div className="absolute inset-y-0" style={{ left, width, background: 'color-mix(in srgb, var(--tl-accent) 22%, transparent)', boxShadow: 'inset 1px 0 var(--tl-accent), inset -1px 0 var(--tl-accent)' }} />
+        <div data-timeline-refer-range="" className="absolute inset-y-0" style={{ left, width, background: 'color-mix(in srgb, var(--tl-accent) 22%, transparent)', boxShadow: 'inset 1px 0 var(--tl-accent), inset -1px 0 var(--tl-accent)' }} />
         {tag(left + width, `${chatClock(draft.startMs)}–${chatClock(draft.endMs)}`)}
       </div>
     );

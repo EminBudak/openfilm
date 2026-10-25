@@ -117,6 +117,9 @@ export const enUS = {
   },
   agent: {
     contextCompacted: 'Earlier conversation folded into a summary',
+    modelGone: 'This agent no longer offers {model}. Choose a model again.',
+    settingFailed: 'Couldn’t set {setting} to {value}: {error}',
+    settingRejected: 'The agent couldn’t apply this setting.',
     thinking: 'Thinking',
   },
   assets: {

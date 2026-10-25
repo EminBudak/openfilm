@@ -38,6 +38,7 @@
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { PI_APIS, contextLength, modelEffort } from './pi-config.mjs';
 
 import { AGENT_DEFINITIONS, AGENT_IDS, OWN_AGENT_IDS, isAgentId } from './agent-definitions.mjs';
@@ -58,11 +59,13 @@ const DEFAULT_SHOWN = { codex: true, claude: true, byok: false };
    signs in to their Claude subscription the first time */
 const DEFAULT_DISCONNECTED = Object.freeze(['claude']);
 /**
- * How long a sign-in in Terminal is waited for, asked about every few seconds: a person may first sign in to the
- * maker's site, with a code sent to them (five minutes, as it was, was too short for Cursor's). Once it is over, the
- * window coming back into focus asks again (Settings → Agents).
+ * How long a sign-in in Terminal is waited for: a person may first sign in to the maker's site, with a code sent to
+ * them (five minutes, as it was, was too short for Cursor's). Once it is over, the window coming back into focus asks
+ * again (Settings → Agents). A sign-in is asked about every second, so finishing it shows at once; an install, every
+ * few seconds.
  */
-const SIGN_IN_WAIT = { ms: 15 * 60_000, pollMs: 3000 };
+const SIGN_IN_WAIT = { ms: 15 * 60_000, pollMs: 1000 };
+const INSTALL_WAIT = { ms: 15 * 60_000, pollMs: 3000 };
 
 /** A red 16 × 16 picture, for asking a model whether it reads pictures. */
 const PROBE_PNG = 'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAFklEQVR4nGN4pqFBEmIY1TCqYfhqAACM5TYQULtblwAAAABJRU5ErkJggg==';
@@ -209,8 +212,8 @@ export async function probeModel({ format, baseUrl, key, model, fetch: fetchImpl
  * @param {{
  *   dataDir: string,
  *   localAgents: () => Promise<Array<{ id: string, cli: { path: string } | null, signedIn: boolean | null, account?: object | null, problem?: string, install: string | null, setupRequired: string | null, app?: string | null, installer?: string | null }>>,
- *   localAgent?: (id: string) => Promise<{ id: string, cli: { path: string } | null, signedIn: boolean | null, account?: object | null, problem?: string, install: string | null, setupRequired: string | null, app?: string | null, installer?: string | null }>,
- *   openSignIn: (id: string) => Promise<{ ok: boolean, error?: string }>,
+ *   localAgent?: (id: string, options?: { fresh?: boolean }) => Promise<{ id: string, cli: { path: string } | null, signedIn: boolean | null, account?: object | null, problem?: string, install: string | null, setupRequired: string | null, app?: string | null, installer?: string | null }>,
+ *   openSignIn: (id: string) => Promise<{ ok: boolean, error?: string, isOpen?: () => Promise<boolean | null> }>,
  *   openInstaller?: (id: string) => Promise<{ ok: boolean, error?: string }>,
  *   usePaths?: (paths: Record<string, string>) => void,
  *   pickProgram?: (id: string, words?: { title?: string, button?: string }) => Promise<string | null>,
@@ -232,6 +235,9 @@ export function createRoster(deps) {
   /** what is happening now, beyond what is kept: a sign-in or an install waited for, an error to show */
   const live = { waiting: {}, installing: {}, errors: {} };
   let local = null;
+  const revision = new Map();
+  const checking = new Map();
+  let refreshing = null;
 
   /* each own model's key by its id; the one key of a version before is the key of the models set up then */
   const keysFile = join(dataDir, 'byok-keys');
@@ -284,18 +290,44 @@ export function createRoster(deps) {
   const save = (next) => { choices = next; writeChoices(dataDir, choices); changed(); };
 
   async function refresh() {
-    const found = await deps.localAgents().catch(() => null);
-    local = found ?? local ?? [];
-    changed();
-    return list();
+    // Focus after signing in should not wait for every other agent to finish its own status command. Only the agent
+    // being signed in is asked fresh; the others keep their cached answers in the full scan.
+    if (deps.localAgent) {
+      for (const id of Object.keys(live.waiting)) {
+        const waiting = live.waiting[id];
+        void lookAgain(id, () => !choices.disconnected.includes(id) && live.waiting[id] === waiting && !waiting.signal.aborted);
+      }
+    }
+    if (!refreshing) {
+      const started = new Map(revision);
+      refreshing = (async () => {
+        const found = await deps.localAgents().catch(() => null);
+        if (found) {
+          const current = local ?? [];
+          // A full scan started before a fresh sign-in check must not overwrite its newer result.
+          local = found.map((a) => revision.get(a.id) !== started.get(a.id) ? current.find((v) => v.id === a.id) ?? a : a);
+          local.push(...current.filter((a) => revision.get(a.id) !== started.get(a.id) && !found.some((v) => v.id === a.id)));
+        } else local ??= [];
+        changed();
+        return list();
+      })().finally(() => { refreshing = null; });
+    }
+    return refreshing;
   }
 
   /** The one agent signed in to, asked again: alone when it can be, not every agent every few seconds. */
-  async function lookAgain(id) {
-    if (!deps.localAgent) { await refresh(); return; }
-    const one = await deps.localAgent(id).catch(() => null);
-    if (!one) return;
-    local = [...(local ?? []).filter((a) => a.id !== id), one];
+  async function lookAgain(id, current) {
+    let pending = checking.get(id);
+    if (!pending) {
+      pending = (deps.localAgent ? deps.localAgent(id, { fresh: Boolean(live.waiting[id]) }) : deps.localAgents()).catch(() => null);
+      checking.set(id, pending);
+      void pending.finally(() => { if (checking.get(id) === pending) checking.delete(id); });
+    }
+    const found = await pending;
+    if (!found || !current()) return;
+    local = deps.localAgent ? [...(local ?? []).filter((a) => a.id !== id), found] : found;
+    if (deps.localAgent) revision.set(id, (revision.get(id) ?? 0) + 1);
+    else for (const one of found) revision.set(one.id, (revision.get(one.id) ?? 0) + 1);
     changed();
   }
 
@@ -303,26 +335,53 @@ export function createRoster(deps) {
    * Looked at again every few seconds until `done` says so, or for as long as a sign-in is waited for. A wait started
    * again for the same agent (Start again) takes over: the one before stops, and leaves the new one's state alone.
    */
-  async function waitFor(id, kind, done) {
-    const mine = Symbol(kind);
+  async function waitFor(id, kind, done, isOpen) {
+    live[kind][id]?.abort();
+    const mine = new AbortController();
     live[kind][id] = mine;
     changed();
-    const wait = deps.signInWait ?? SIGN_IN_WAIT;
-    const until = Date.now() + wait.ms;
-    while (Date.now() < until && live[kind][id] === mine) {
-      await new Promise((resolve) => setTimeout(resolve, wait.pollMs));
-      await lookAgain(id);
-      if (done(local?.find((a) => a.id === id))) break;
+    const wait = deps.signInWait ?? (kind === 'waiting' ? SIGN_IN_WAIT : INSTALL_WAIT);
+    const current = () => live[kind][id] === mine && !mine.signal.aborted;
+    const stopped = new Promise((resolve) => mine.signal.addEventListener('abort', resolve, { once: true }));
+    const timeout = setTimeout(() => mine.abort(), wait.ms);
+    let terminalTimer;
+    // Window checks run separately: an ACP sign-in probe may take 30 seconds to answer.
+    const checkTerminal = async () => {
+      const open = await isOpen().catch(() => null);
+      if (!current()) return;
+      if (open === false) mine.abort();
+      else terminalTimer = setTimeout(checkTerminal, wait.pollMs);
+    };
+    if (isOpen) void checkTerminal();
+    try {
+      while (current()) {
+        await Promise.race([lookAgain(id, current), stopped]);
+        if (!current() || done(local?.find((a) => a.id === id))) break;
+        await delay(wait.pollMs, undefined, { signal: mine.signal }).catch(() => {});
+      }
+    } finally {
+      clearTimeout(timeout);
+      clearTimeout(terminalTimer);
+      mine.abort();
     }
     if (live[kind][id] !== mine) return;
     delete live[kind][id];
     changed();
   }
-  const waitForSignIn = (id) => waitFor(id, 'waiting', (a) => a?.signedIn !== false);
+  const waitForSignIn = (id, isOpen) => waitFor(id, 'waiting', (a) => a?.signedIn !== false, isOpen);
+
+  function cancelSignIn(id) {
+    if (!isOwn(id)) return;
+    live.waiting[id]?.abort();
+    delete live.waiting[id];
+    revision.set(id, (revision.get(id) ?? 0) + 1);
+    changed();
+  }
 
   return {
     list,
     refresh,
+    cancelSignIn,
 
     /** Connect: back on here; its own sign-in when it needs one. */
     async connect(id) {
@@ -338,7 +397,7 @@ export function createRoster(deps) {
           if (now?.status !== 'sign-in' && now?.status !== 'waiting') return { ok: true };
           const opened = await deps.openSignIn(id);
           if (!opened.ok) { live.errors[id] = opened.error ?? 'Terminal did not open.'; changed(); return { ok: false, error: live.errors[id] }; }
-          void waitForSignIn(id);
+          void waitForSignIn(id, opened.isOpen);
           return { ok: true };
         }
         await refresh();
@@ -353,7 +412,7 @@ export function createRoster(deps) {
     /** Disconnect here only: its sessions close; its own sign-in stays as it is (connecting again uses it as it is then). */
     disconnect(id) {
       if (!isAgentId(id)) return;
-      delete live.waiting[id];
+      cancelSignIn(id);
       deps.closeSessions(id);
       save({ ...choices, disconnected: [...new Set([...choices.disconnected, id])] });
     },

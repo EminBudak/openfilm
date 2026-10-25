@@ -117,6 +117,9 @@ export const es: Words = {
   },
   agent: {
     contextCompacted: 'La conversación anterior se resumió',
+    modelGone: 'Este agente ya no ofrece {model}. Vuelve a elegir un modelo.',
+    settingFailed: 'No se pudo poner {setting} en {value}: {error}',
+    settingRejected: 'El agente no pudo aplicar este ajuste.',
     thinking: 'Pensando',
   },
   assets: {

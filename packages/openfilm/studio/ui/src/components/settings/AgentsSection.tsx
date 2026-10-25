@@ -228,6 +228,11 @@ export function AgentsSection() {
     if (agent.status === 'key') return <SettingsButton onClick={() => setKeyOpen(true)}>{t('settings.agents.setUpKey')}</SettingsButton>;
     if (agent.status === 'unavailable') return null;
     if (agent.status === 'checking') return <Loader2 size={16} className="animate-spin text-[var(--text-muted)]" aria-hidden />;
+    if (agent.status === 'waiting') return (
+      <SettingsButton variant="quiet" disabled={working} onClick={() => act(agent.id, () => host.cancelSignIn ? host.cancelSignIn(agent.id) : host.disconnect(agent.id))}>
+        {t('settings.agents.cancel')}
+      </SettingsButton>
+    );
     /* disconnected: the program it runs can be pointed at before connecting again (a particular version, another
        install); a connected one keeps the program it found. The own key has none */
     const canLocate = agent.status === 'off' && host.locate && agent.id !== 'byok';
@@ -238,7 +243,7 @@ export function AgentsSection() {
             {t('settings.agents.locate')}
           </SettingsButton>
         ) : null}
-        <SettingsButton disabled={working || agent.status === 'waiting'} onClick={() => act(agent.id, () => host.connect(agent.id))}>
+        <SettingsButton disabled={working} onClick={() => act(agent.id, () => host.connect(agent.id))}>
           {working ? <Loader2 size={16} className="animate-spin" aria-hidden /> : null}
           {agent.status === 'sign-in' ? t('settings.agents.signIn') : t('settings.agents.connect')}
         </SettingsButton>
@@ -340,7 +345,7 @@ export function AgentsSection() {
             {agent.status === 'waiting' ? (
               <p className="text-[14.5px] leading-relaxed text-[var(--text-muted)]">
                 {t(WAITING_HINTS[agent.id] ?? 'settings.agents.waitingHint')}{' '}
-                <button type="button" onClick={() => act(agent.id, () => host.connect(agent.id))} className="underline underline-offset-2 hover:text-[var(--text)]">{t('settings.agents.startAgain')}</button>
+                <button type="button" disabled={busy === agent.id} onClick={() => act(agent.id, () => host.connect(agent.id))} className="underline underline-offset-2 hover:text-[var(--text)]">{t('settings.agents.startAgain')}</button>
               </p>
             ) : null}
             {open ? <OwnModels agent={agent} onDone={() => setKeyOpen(false)} /> : null}

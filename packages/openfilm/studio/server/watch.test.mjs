@@ -4,9 +4,67 @@ import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { revOf } from './film.mjs';
-import { createWatchers, watchTree } from './watch.mjs';
+import { createWatchers, watchFolder, watchTree } from './watch.mjs';
 
 const settle = (ms = 400) => new Promise((r) => setTimeout(r, ms));
+const until = async (ready) => {
+  for (const end = Date.now() + 4000; !ready() && Date.now() < end;) await settle(25);
+  assert.ok(ready(), 'the presence change was reported');
+};
+
+test('a deleted film leaves its editor even when its folder and caches remain; no empty film is published', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'of-watch-film-gone-'));
+  writeFileSync(join(root, 'film.html'), 'original');
+  mkdirSync(join(root, '.film'));
+  const seen = [];
+  const stop = watchFolder(root, (event) => seen.push(event));
+  try {
+    await settle(600);
+    seen.length = 0;
+    rmSync(join(root, 'film.html'));
+    await until(() => seen.some((e) => e.type === 'gone'));
+    writeFileSync(join(root, '.film', 'cache'), 'cache written after deletion');
+    await settle(1200);
+    assert.deepEqual(seen, [{ type: 'gone' }]);
+  } finally {
+    stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a film briefly removed during a save is refreshed, without closing its editor', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'of-watch-save-'));
+  writeFileSync(join(root, 'film.html'), 'before');
+  const seen = [];
+  const stop = watchFolder(root, (event) => seen.push(event));
+  try {
+    await settle(600);
+    seen.length = 0;
+    rmSync(join(root, 'film.html'));
+    await settle(200);
+    writeFileSync(join(root, 'film.html'), 'after');
+    await until(() => seen.some((e) => e.type === 'film' && e.rev === revOf('after')));
+    assert.ok(!seen.some((e) => e.type === 'gone' || (e.type === 'film' && e.rev === revOf(''))));
+  } finally {
+    stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('presence is checked even when no native watcher could start, and stops on unsubscribe', async () => {
+  const scratch = mkdtempSync(join(tmpdir(), 'of-watch-missing-'));
+  const seen = [];
+  const stop = watchFolder(join(scratch, 'gone-before-subscribe'), (event) => seen.push(event));
+  try {
+    await until(() => seen.some((e) => e.type === 'gone'));
+  } finally { stop(); }
+  const cancelled = [];
+  const cancel = watchFolder(join(scratch, 'also-gone'), (event) => cancelled.push(event));
+  cancel();
+  await settle(1600);
+  assert.deepEqual(cancelled, []);
+  rmSync(scratch, { recursive: true, force: true });
+});
 
 test('film.html changes come with their revision, other files as one files event; .film/ is not watched', async () => {
   const root = mkdtempSync(join(tmpdir(), 'of-watch-'));

@@ -50,9 +50,21 @@ interface LocalAgentStore extends Persisted {
 }
 
 const probing = new Set<LocalAgentId>();
-/** the agents asked for their options since the app started: the ones kept from before are shown until then, but an
-    agent updated since (Claude Code with new models) has other options, so each is asked once a launch */
-const askedThisLaunch = new Set<LocalAgentId>();
+/** The last model asked for this launch. Refresh saved catalogs once, and dependent options on each model pick. */
+const askedThisLaunch = new Map<LocalAgentId, string>();
+
+/** A selected model can have different effort/speed options from the agent's default model. */
+function probeModel(state: Persisted, agent: LocalAgentId): string | undefined {
+  const option = state.options[agent]?.find((o) => o.category === 'model');
+  const model = option && state.prefs[agent]?.[option.id];
+  if (agent === 'cursor' && typeof model === 'string') {
+    const legacy = /^([^\[]+)\[([^\]]*)\]$/.exec(model);
+    if (legacy) return legacy[1];
+  }
+  return typeof model === 'string' && option?.options?.some((o) => o.value === model) ? model : undefined;
+}
+
+const probeKey = (agent: LocalAgentId, model: string | undefined) => JSON.stringify([agent, model]);
 
 const KEY = 'openfilm.local-agents.v2';
 
@@ -102,7 +114,16 @@ const EFFORT_NAMES: Record<string, string> = { auto: 'Auto', off: 'Off', minimal
  * `effort` options, apps/desktop/src/pi-config.mjs). The person's own agents' is the one a session last reported.
  */
 export function agentOptions(state: Pick<LocalAgentStore, 'options' | 'roster'> & Partial<Pick<LocalAgentStore, 'prefs'>>, agent: LocalAgentId): ConfigOptions | undefined {
-  if (agent !== 'byok') return state.options[agent];
+  if (agent !== 'byok') {
+    const options = state.options[agent];
+    const model = options?.find((o) => o.category === 'model');
+    const picked = model && state.prefs?.[agent]?.[model.id];
+    // Until the new model answers, none of the previous model's effort/speed/context options belong in its menu.
+    if (model && picked != null && picked !== model.currentValue) {
+      return options?.filter((o) => o.category === 'model' || o.category === 'mode' || o.category === 'permissions');
+    }
+    return options;
+  }
   const models = byokModels(state.roster);
   if (!models.length) return undefined;
   const model = ownModelPicked(models, state.prefs?.byok?.model) ?? models[0]!;
@@ -125,12 +146,14 @@ export function offeredOption(agent: LocalAgentId, _roster: RosterAgent[] | null
 const CLAUDE_MODELS_OFFERED = 4;
 
 /**
- * The choices a menu row offers, in the agent's order, without a "Default" row (a default is one of the others). Of
+ * The choices a menu row offers, in the agent's order. Native Default choices reset the model's effort. Of
  * Claude Code's models, the first four it lists, as its own picker shows them, and the one in use if it is further down.
  */
 export function offeredChoices<T extends { value: unknown }>(agent: LocalAgentId, option: { id: string; category?: string; options?: T[] }, chosen: unknown): T[] {
-  const choices = (option.options ?? []).filter((choice) => choice.value !== 'default');
-  if (agent !== 'claude' || (option.category !== 'model' && option.id !== 'model')) return choices;
+  const all = option.options ?? [];
+  if (agent !== 'claude') return all;
+  const choices = all.filter((choice) => choice.value !== 'default');
+  if (option.category !== 'model' && option.id !== 'model') return choices;
   return choices.filter((choice, i) => i < CLAUDE_MODELS_OFFERED || choice.value === chosen);
 }
 
@@ -184,35 +207,58 @@ export const useLocalAgents = create<LocalAgentStore>((set, get) => ({
     save(get());
   },
   setPref(agent, configId, value) {
-    const prefs = { ...get().prefs, [agent]: { ...(get().prefs[agent] ?? {}), [configId]: value } };
+    const model = agentOptions(get(), agent)?.find((o) => o.category === 'model');
+    const before = get().prefs[agent] ?? {};
+    const changingModel = model?.id === configId && value !== (before[configId] ?? model.currentValue);
+    // A new model starts with its own defaults; parameters from a different model are not global agent settings.
+    const prefs = { ...get().prefs, [agent]: { ...(changingModel ? {} : before), [configId]: value } };
     set({ prefs });
     save(get());
+    if (get().options[agent]?.some((o) => o.id === configId && o.category === 'model')) void get().ensureOptions(agent);
   },
   noteOptions(agent, options) {
     if (!options) return;
-    set({ options: { ...get().options, [agent]: options } });
+    let prefs = get().prefs;
+    /* Before Cursor's parameterized picker, a model id included effort/speed/context in brackets. Keep that
+       selection when replacing the old catalog with the model and its separately configurable parameters. */
+    const legacy = agent === 'cursor' && typeof prefs.cursor?.model === 'string' ? /^([^\[]+)\[([^\]]*)\]$/.exec(prefs.cursor.model) : null;
+    if (legacy && options.find((o) => o.category === 'model')?.options?.some((o) => o.value === legacy[1])) {
+      const values = Object.fromEntries(legacy[2]!.split(',').map((part) => part.split('=').map((s) => s.trim())));
+      const picked: Record<string, unknown> = { ...prefs.cursor, model: legacy[1] };
+      for (const option of options) {
+        const value = option.category === 'thought_level' ? values.reasoning_effort ?? values.effort ?? values.reasoning : values[option.id];
+        if (!(option.id in picked) && option.options?.some((o) => o.value === value)) picked[option.id] = value;
+      }
+      prefs = { ...prefs, cursor: picked };
+    }
+    set({ prefs, options: { ...get().options, [agent]: options } });
     save(get());
   },
   async ensureOptions(agent, { retry = false } = {}) {
     /* the own key's are known from Settings (agentOptions); a failed probe is not tried again on every render, each
        try being a whole session of the agent's */
     if (agent === 'byok' || probing.has(agent)) return;
+    const model = probeModel(get(), agent);
+    const key = probeKey(agent, model);
     const kept = Boolean(get().options[agent]);
-    if (kept && askedThisLaunch.has(agent)) return;
-    if (get().optionsError[agent] && !retry) return;
+    const matched = model == null || get().options[agent]?.find((o) => o.category === 'model')?.currentValue === model;
+    if (askedThisLaunch.get(agent) === key && (matched || get().optionsError[agent]) && (!retry || !get().optionsError[agent])) return;
     const api = desktopBridge()?.localAgents;
     if (!api) return;
     probing.add(agent);
-    askedThisLaunch.add(agent);
+    askedThisLaunch.set(agent, key);
     set({ optionsError: { ...get().optionsError, [agent]: undefined } });
     try {
-      const r = await api.probe(agent).catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e), code: undefined }));
+      const r = await api.probe(agent, model).catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e), code: undefined }));
+      // A newer model pick wins; an older response must not replace its effort list.
+      if (probeKey(agent, probeModel(get(), agent)) !== key) return;
       if (r.ok && r.info.commands?.length) keepCommands(agent, readCommands({ availableCommands: r.info.commands }));
       if (r.ok && r.info.configOptions?.length) get().noteOptions(agent, r.info.configOptions);
       /* the ones kept from before stay when this launch's ask fails */
-      else if (!kept) set({ optionsError: { ...get().optionsError, [agent]: r.ok ? { text: 'no options' } : { text: r.error, ...(r.code ? { code: r.code } : {}) } } });
+      else if (!kept || model != null) set({ optionsError: { ...get().optionsError, [agent]: r.ok ? { text: 'no options' } : { text: r.error, ...(r.code ? { code: r.code } : {}) } } });
     } finally {
       probing.delete(agent);
+      if (probeKey(agent, probeModel(get(), agent)) !== key) void get().ensureOptions(agent);
     }
   },
 }));
@@ -241,18 +287,20 @@ const DROPPED_PREFS = new Set(['plan', 'collaboration_mode']);
  * picked by its name at the service (before each model was set up on its own) is its id now.
  */
 export function effectivePrefs(prefs: Persisted['prefs'], agent: LocalAgentId, roster?: RosterAgent[] | null, options?: ConfigOptions): Record<string, unknown> {
-  /* "default" was a row the menu no longer offers (the agents name their default for what it is): the agent's own
-     current value stands instead. A mode picked once (plan mode, offered for a while) is not kept: every agent works
+  /* An old "default" pick absent from the agent's choices is discarded; a native Default (effort reset, Cursor Auto)
+     remains an explicit selection. A mode picked once (plan mode, offered for a while) is not kept: every agent works
      with full access. A pick the agent no longer offers (a model gone in its update, one the own key no longer names)
      is not kept either: the agent's own stands instead */
   const offers = (id: string, value: unknown) => {
+    if (!options) return true;
     const option = options?.find((o) => o.id === id);
-    return !option?.options?.length || option.options.some((o) => o.value === value);
+    return !!option && (!option.options?.length || option.options.some((o) => o.value === value));
   };
   const models = agent === 'byok' ? byokModels(roster ?? null) : null;
   const own = Object.entries(prefs[agent] ?? {}).map(([id, value]): [string, unknown] => (models && id === 'model' ? [id, ownModelPicked(models, value)?.id ?? null] : [id, value]));
   const kept = Object.fromEntries(own
-    .filter(([id, value]) => value !== 'default' && value !== null && !DROPPED_PREFS.has(id) && offers(id, value)));
+    .filter(([id, value]) => value !== null && (value !== 'default' || options?.find((o) => o.id === id)?.options?.some((o) => o.value === value))
+      && !DROPPED_PREFS.has(id) && offers(id, value)));
   return { ...kept, ...(AGENT_FORCED_PREFS[agent] ?? {}) };
 }
 

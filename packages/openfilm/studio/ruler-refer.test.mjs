@@ -27,9 +27,18 @@ test('with the app\'s chat, a ruler click moves the playhead and a ⌘-click (Ct
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, locale: 'en-US', reducedMotion: 'reduce' });
     /* the app's chat, as far as the ruler sees it: what is referred to it */
     await page.addInitScript(() => {
+      // A choice saved by an older version must not bring back hover preview.
+      localStorage.setItem('openfilm.timeline.previewAxis', '1');
       window.referred = [];
-      window.openfilmHost = { version: 1, refer: (ref) => window.referred.push(ref) };
+      window.openfilmHost = {
+        version: 1, refer: (ref) => window.referred.push(ref),
+        onCommand: (receive) => { window.studioCommand = receive; },
+      };
     });
+    await page.route(`**/api/projects/${project.id}/captions`, (route) => route.fulfill({ json: {
+      cues: [{ startMs: 2000, durMs: 500, text: 'Subtitle cue', clip: 'card', src: 'assets/card.svg', line: 0 }],
+      sourceLanguage: null, languages: [], untranscribed: [],
+    } }));
     await page.goto(`${studio.origin}/projects/${project.id}?key=${studio.key}`);
     await page.locator('[data-block-id]').first().waitFor({ state: 'visible' });
     const slider = page.locator('[data-timeline] [role="slider"]').first();
@@ -41,6 +50,11 @@ test('with the app\'s chat, a ruler click moves the playhead and a ⌘-click (Ct
     /* the key a box is drawn with on the picture: ⌘ on a Mac, Ctrl elsewhere */
     const key = process.platform === 'darwin' ? 'Meta' : 'Control';
     assert.equal(await playhead(), 0);
+    assert.equal(await page.locator('[data-timeline-preview-axis], [data-preview-axis]').count(), 0, 'the preview axis switch and line are removed');
+    assert.equal(await page.getByRole('button', { name: 'Preview axis', exact: true }).count(), 0);
+    await page.mouse.move(ruler.x + 200, y + 100);
+    await page.keyboard.press('s');
+    assert.equal(await playhead(), 0, 'hovering and the old shortcut do not seek');
 
     /* a plain click: the playhead goes there, nothing is referred. Just after the page opens, the preview may not take
        a seek yet (the playhead is where the preview is), so the click is made again until it does */
@@ -58,16 +72,33 @@ test('with the app\'s chat, a ruler click moves the playhead and a ⌘-click (Ct
     await page.mouse.move(ruler.x + 300, y, { steps: 5 });
     await page.mouse.up();
     await page.waitForFunction((before) => Number(document.querySelector('[data-timeline] [role="slider"]')?.getAttribute('aria-valuenow')) > before, clicked);
-    const dragged = await playhead();
     assert.deepEqual(await referred(), []);
+
+    /* blank subtitle space follows the ruler's seeking gesture; a cue itself still selects and edits */
+    const subtitleRow = page.locator('[data-subtitle-row]');
+    await subtitleRow.waitFor({ state: 'visible' });
+    const row = await subtitleRow.boundingBox();
+    const beforeBlank = await playhead();
+    await page.mouse.click(ruler.x + 60, row.y + row.height / 2);
+    await page.waitForFunction((before) => Number(document.querySelector('[data-timeline] [role="slider"]')?.getAttribute('aria-valuenow')) < before, beforeBlank);
+    const blankClicked = await playhead();
+    await page.mouse.move(ruler.x + 60, row.y + row.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(ruler.x + 180, row.y + row.height / 2, { steps: 5 });
+    await page.mouse.up();
+    await page.waitForFunction((before) => Number(document.querySelector('[data-timeline] [role="slider"]')?.getAttribute('aria-valuenow')) > before, blankClicked);
+    const dragged = await playhead();
+    await page.locator('[data-subtitle-cue]').first().click();
+    assert.equal(await playhead(), dragged, 'clicking a subtitle cue does not also seek');
+    assert.equal(await page.getByRole('button', { name: 'Add to chat', exact: true }).count(), 0, 'the floating reference button is absent');
 
     /* the moment a click would refer is drawn only while the key is held, with a crosshair */
     await page.mouse.move(ruler.x + 60, y);
-    assert.equal(await slider.evaluate((el) => el.style.cursor), 'col-resize');
+    assert.equal(await slider.evaluate((el) => el.style.cursor), 'default');
     await page.keyboard.down(key);
     await page.waitForFunction(() => document.querySelector('[data-timeline] [role="slider"]')?.style.cursor === 'crosshair');
     await page.keyboard.up(key);
-    await page.waitForFunction(() => document.querySelector('[data-timeline] [role="slider"]')?.style.cursor === 'col-resize');
+    await page.waitForFunction(() => document.querySelector('[data-timeline] [role="slider"]')?.style.cursor === 'default');
 
     /* a ⌘-click refers that moment, a ⌘-drag that span; the playhead stays */
     await page.keyboard.down(key);
@@ -75,6 +106,12 @@ test('with the app\'s chat, a ruler click moves the playhead and a ⌘-click (Ct
     await page.mouse.move(ruler.x + 40, y);
     await page.mouse.down();
     await page.mouse.move(ruler.x + 120, y, { steps: 5 });
+    const draft = page.locator('[data-timeline-refer-range]');
+    await draft.waitFor({ state: 'visible' });
+    const band = await draft.boundingBox();
+    assert.ok(band.height <= ruler.height, 'the chosen span stays within the top ruler while dragging');
+    assert.ok(band.width > 20, 'the ruler shows the current span before release');
+    assert.equal(await page.evaluate(() => document.body.classList.contains('tl-pinning')), true);
     await page.mouse.up();
     await page.keyboard.up(key);
     const refs = await referred();
@@ -82,6 +119,34 @@ test('with the app\'s chat, a ruler click moves the playhead and a ⌘-click (Ct
     assert.ok(refs[0].time > 0 && refs[0].time * 1000 < clicked);
     assert.ok(refs[1].start < refs[1].end);
     assert.equal(await playhead(), dragged);
+    assert.equal(await draft.count(), 0, 'release removes the live preview');
+    assert.equal(await page.evaluate(() => document.body.classList.contains('tl-pinning')), false);
+
+    /* recalling that span seeks to its start and briefly tints only the ruler */
+    const flash = page.locator('[data-timeline-range-flash]');
+    await page.evaluate(() => window.studioCommand({ type: 'show-range', start: 0.1, end: 0.6 }));
+    await flash.waitFor({ state: 'visible' });
+    const flashed = await flash.boundingBox();
+    const subtitleBounds = await subtitleRow.boundingBox();
+    assert.ok(flashed.y + flashed.height <= subtitleBounds.y + 0.5, 'the highlight ends above the subtitle and clip rows');
+    assert.equal(await page.locator('[data-timeline-range]').count(), 0, 'no persistent range or its label is created');
+    await page.waitForFunction(() => Math.abs(Number(document.querySelector('[data-timeline] [role="slider"]')?.getAttribute('aria-valuenow')) - 100) <= 40);
+    assert.equal(await page.getByRole('button', { name: 'Add to chat', exact: true }).count(), 0);
+    await flash.waitFor({ state: 'hidden', timeout: 3000 });
+    assert.equal(await page.locator('[data-timeline-range]').count(), 0);
+
+    /* cancelling a reference drag clears the preview and cursor without adding another pill */
+    await page.keyboard.down(key);
+    await page.mouse.move(ruler.x + 40, y);
+    await page.mouse.down();
+    await page.mouse.move(ruler.x + 140, y, { steps: 5 });
+    await draft.waitFor({ state: 'visible' });
+    await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+    await draft.waitFor({ state: 'hidden' });
+    await page.mouse.up();
+    await page.keyboard.up(key);
+    assert.equal((await referred()).length, 2);
+    assert.equal(await page.evaluate(() => document.body.classList.contains('tl-pinning')), false);
   } finally {
     await browser?.close();
     await studio?.close();

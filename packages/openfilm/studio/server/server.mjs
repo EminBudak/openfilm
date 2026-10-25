@@ -43,6 +43,7 @@ import { ensurePreviews, knownLate } from './preview-cache.mjs';
 import { npmOpenfilm, olderThanThis } from '../client.mjs';
 import { writeAtomic } from './atomic.mjs';
 import { createWatchers } from './watch.mjs';
+import { projectMissing } from './project-presence.mjs';
 import { installedFonts } from './fonts.mjs';
 import { projectFonts, resolveIn } from './project-fonts.mjs';
 import { FILM_PAGE, PageFrameError, closePageFrames, filmPoster, pageFacts, pageFrame, warmFilmPoster } from './pageframes.mjs';
@@ -548,9 +549,14 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
     }
     const project = await projectById(parts[1]);
     const rest = parts.slice(2).join('/');
-    /* a project whose folder is gone (moved, renamed or deleted outside Studio): taking it off the list is all there is */
-    if (!existsSync(project.path) && !(!rest && req.method === 'DELETE')) {
-      throw new HttpError(410, 'This project’s folder is not there any more: it was moved, renamed or deleted.', { code: 'missing' });
+    /* Never enter or write into a project removed outside Studio, even if cache writers left its folder behind. */
+    const requireProject = () => {
+      const missing = projectMissing(project.path);
+      if (missing) throw new HttpError(410, missing === 'film' ? 'This project’s film.html is missing.'
+        : 'This project’s folder is not there any more: it was moved, renamed or deleted.', { code: missing === 'film' ? 'missing-film' : 'missing' });
+    };
+    if (!(!rest && req.method === 'DELETE')) {
+      requireProject();
     }
     /* ── subtitles: the film's lines, the person's subtitle style, translation (see captions.mjs) ── */
     if (await captionRoutes(req, res, project.path, rest, { translate: subtitleTranslator, transcribe: await subtitleTranscriber() })) return;
@@ -565,6 +571,7 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
       /* `folder`: the project's files on the film's origin, where the preview loads them */
       if (req.method === 'GET') {
         const film = await readProjectFilm(project.path);
+        requireProject();
         /* opened: its card in the projects list gets a picture before the list first shows it */
         if (film.doc?.tracks.some((t) => t.clips.length)) warmFilmPoster(project.path, pages.folderUrl(project));
         return json(res, 200, { project, folder: pages.folderUrl(project), ...film });
@@ -996,7 +1003,7 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
       }
       if (parts.length === 4 && parts[0] === 'api' && parts[1] === 'projects' && parts[3] === 'events') {
         const project = await projectById(parts[2]).catch(() => null);
-        if (!project || !existsSync(project.path)) return refuse('404 Not Found');
+        if (!project || project.missing) return refuse('404 Not Found');
         const send = acceptWebSocket(req, socket, () => stop());
         if (send) stop = projectStream(project, send);
         return;

@@ -679,8 +679,8 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
       turn,
       options: prefs,
       meta,
+      onOptions: (options) => useLocalAgents.getState().noteOptions(agent, options),
       onSessionInfo: (info) => {
-        useLocalAgents.getState().noteOptions(agent, info.configOptions);
         /* a session it could not take up again has none of the skills' pages from before: those of this message only */
         const fresh = !info.resumed || info.sessionId !== resume;
         if (info.sessionId && fresh) {

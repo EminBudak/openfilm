@@ -91,6 +91,8 @@ export interface StudioHost {
   agents?: {
     list: () => Promise<HostAgent[]>;
     connect: (id: HostAgentId) => Promise<{ ok: boolean; error?: string }>;
+    /** Stop waiting for terminal sign-in without disconnecting the agent or changing its own sign-in. */
+    cancelSignIn?: (id: HostAgentId) => Promise<unknown>;
     disconnect: (id: HostAgentId) => Promise<unknown>;
     /** Codex: what is left of its plan, as it says for the account signed in (null: it can't say; other agents, null) */
     usage?: (id: HostAgentId, fresh?: boolean) => Promise<HostAgentUsage | null>;
@@ -353,7 +355,7 @@ export interface StudioSelection {
 }
 
 /**
- * What an app can ask Studio to show: a clip selected (by its film.html id, or its place), a moment, a range marked,
+ * What an app can ask Studio to show: a clip selected (by its film.html id, or its place), a moment, a range briefly lit,
  * a box on the picture shown at its moment, a track, a file of the media pane, a subtitle line (its span marked, the
  * subtitle panel open on it).
  *

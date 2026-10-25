@@ -692,7 +692,7 @@ function ProjectCard({
           ) : null}
         </button>
         <SelectToggle selecting={selecting} selected={selected} onToggle={onToggleSelect} label={t('library.toggleSelect')} />
-        {project.missing && !selecting ? <MissingActions onLocate={onLocate} onRemove={onDelete} /> : null}
+        {project.missing && !selecting ? <MissingActions reason={project.missingReason} onLocate={onLocate} onRemove={onDelete} /> : null}
       </div>
 
       <div className="mt-2 flex min-w-0 items-start gap-1.5">
@@ -713,7 +713,7 @@ function ProjectCard({
           >
             <Video size={11} />
             {formatDate(project.openedAt, language)}
-            {project.missing ? <span className="truncate text-[var(--err)]">· {t('projects.missing')}</span> : null}
+            {project.missing ? <span className="truncate text-[var(--err)]">· {t(project.missingReason === 'film' ? 'projects.missingFilm' : 'projects.missing')}</span> : null}
             {project.working ? <span className="truncate text-[var(--accent)]">· {t('projects.agentRunning')}</span> : null}
           </button>
         </div>
@@ -727,12 +727,12 @@ function ProjectCard({
  * On the cover of a project whose folder is gone: "Folder not found", and the two things to do about it: point it at
  * the folder it is in now (it keeps its place, and its history goes with the folder), or take it off the list.
  */
-function MissingActions({ onLocate, onRemove, compact = false }: { onLocate: () => void; onRemove: () => void; compact?: boolean }) {
+function MissingActions({ reason, onLocate, onRemove, compact = false }: { reason?: Project['missingReason']; onLocate: () => void; onRemove: () => void; compact?: boolean }) {
   const t = useT();
   const button = 'inline-flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium transition';
   return (
     <div className={compact ? 'flex items-center gap-1' : 'pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 p-2'}>
-      {compact ? null : <span className="text-[12px] font-semibold text-white drop-shadow">{t('projects.missing')}</span>}
+      {compact ? null : <span className="text-[12px] font-semibold text-white drop-shadow">{t(reason === 'film' ? 'projects.missingFilm' : 'projects.missing')}</span>}
       <div className="pointer-events-auto flex items-center gap-1.5">
         <button type="button" onClick={onLocate} className={`${button} bg-[var(--surface)] text-[var(--text)] shadow hover:brightness-95`}>
           <FolderSearch size={13} />
@@ -831,12 +831,12 @@ function ProjectListRow({
           </p>
           <p className="mt-2 flex items-center gap-2 text-[11.5px] text-[var(--text-faint)]">
             {formatDate(project.openedAt, language)}
-            {project.missing ? <span className="text-[var(--err)]">· {t('projects.missing')}</span> : null}
+            {project.missing ? <span className="text-[var(--err)]">· {t(project.missingReason === 'film' ? 'projects.missingFilm' : 'projects.missing')}</span> : null}
             {project.working ? <span className="text-[var(--accent)]">· {t('projects.agentRunning')}</span> : null}
           </p>
         </button>
       </div>
-      {project.missing && !selecting ? <MissingActions compact onLocate={onLocate} onRemove={onDelete} /> : null}
+      {project.missing && !selecting ? <MissingActions compact reason={project.missingReason} onLocate={onLocate} onRemove={onDelete} /> : null}
       {!selecting ? <ItemMenu project={project} onOpen={onOpen} onStartRename={onStartRename} onStartSelect={onStartSelect} onMoveToFolder={onMoveToFolder} onLocate={onLocate} onDelete={onDelete} size={15} /> : null}
     </article>
   );

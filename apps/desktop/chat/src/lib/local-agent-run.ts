@@ -28,6 +28,7 @@ import type { Turn } from '@openfilm/shared';
 import type { Balance } from '@/lib/balance';
 import { chatTurns, putChatTurn, type SavedTurn } from '@/lib/chat-store';
 import { app } from '../app-bridge';
+import { translate } from '@/i18n';
 import { isEmptyBackgroundTurn, opensUnprompted } from '@/lib/unprompted';
 import { baseName, titleFile } from '@/lib/step-file';
 import { reduceTranscript, type TranscriptItem, type TranscriptPlanEntry } from '@/lib/agent-transcript';
@@ -537,6 +538,7 @@ interface LiveSession {
   agent: LocalAgentId;
   cwd: string;
   info: LocalAgentSessionInfo;
+  onOptions?: (options: LocalAgentSessionInfo['configOptions']) => void;
   /** the project and the conversation it is the session of */
   projectId: string;
   conversation: string;
@@ -708,6 +710,14 @@ function listen(): void {
   const bridge = desktopBridge()?.localAgents;
   if (!bridge) return;
   unlisten = bridge.onEvent((event) => {
+    if (event.kind === 'update' && event.update.sessionUpdate === 'config_option_update' && Array.isArray(event.update.configOptions)) {
+      const session = [...sessions.values()].find((s) => s.key === event.key);
+      if (session) {
+        session.info.configOptions = event.update.configOptions as LocalAgentSessionInfo['configOptions'];
+        session.onOptions?.(session.info.configOptions);
+      }
+      return;
+    }
     if (event.kind === 'update' && event.update.sessionUpdate === 'usage_update') {
       const { used, size, _meta } = event.update as { used?: unknown; size?: unknown; _meta?: Record<string, unknown> };
       if (typeof used === 'number' && typeof size === 'number' && size > 0) { contextByKey.set(event.key, { used, size }); tellContext(); }
@@ -807,6 +817,7 @@ export async function runLocalAgentTurn({
   turn,
   options = {},
   onSessionInfo,
+  onOptions,
   meta,
   images,
 }: {
@@ -826,6 +837,7 @@ export async function runLocalAgentTurn({
   /** Options the user picked in the model menu (configId → value), set one by one once the session is open. */
   options?: Record<string, unknown>;
   onSessionInfo?: (info: LocalAgentSessionInfo) => void;
+  onOptions?: (options: LocalAgentSessionInfo['configOptions']) => void;
 }): Promise<{ stopReason: string; lastTurnId: string }> {
   const bridge = desktopBridge()?.localAgents;
   if (!bridge) throw new Error('This needs the OpenFilm Mac app.');
@@ -855,26 +867,38 @@ export async function runLocalAgentTurn({
      there are), then the rest one after another. An agent may change other options when one is set (MiniMax Code
      resets its thinking effort when the model changes), so what it answers replaces what the session holds */
   const live = session;
-  const setOption = async ([configId, value]: [string, unknown]) => {
-    const option = live.info.configOptions?.find((o) => o.id === configId);
-    if (!option || option.currentValue === value) return;
-    const r = await bridge.setOption(live.key, configId, value);
-    if (!r.ok) return;
-    const answered = r.result?.configOptions;
-    if (Array.isArray(answered) && answered.length) live.info.configOptions = answered;
-    else option.currentValue = value;
-  };
-  const picked = Object.entries(options);
-  const isModel = ([configId]: [string, unknown]) => live.info.configOptions?.find((o) => o.id === configId)?.category === 'model';
-  for (const entry of picked.filter(isModel)) await setOption(entry);
-  for (const entry of picked.filter((entry) => !isModel(entry))) await setOption(entry);
-
-  /* where it is and how to work (the project, the `openfilm` manual, Studio already open) it was told when the
-     session started (apps/desktop src/agents.mjs INSTRUCTIONS): the message goes as the person wrote it */
+  live.onOptions = onOptions;
   const key = session.key;
-  /* the turn the agent's words go to at the end: this one, or the last message sent into it while it ran (steer) */
+  /* A message sent while it ran may have joined this turn. */
   const last = () => turnByKey.get(key) ?? turn;
   try {
+    const setOption = async ([configId, value]: [string, unknown]) => {
+      const option = live.info.configOptions?.find((o) => o.id === configId);
+      if (!option) return;
+      const model = option.category === 'model';
+      // Cursor can restore a different model when reusing a session. Reassert the selection and read its parameters.
+      if (option.currentValue === value && !(agent === 'cursor' && model)) return;
+      if (option.options?.length && !option.options.some((choice) => choice.value === value)) {
+        if (model) throw new Error(translate('agent.modelGone').replace('{model}', () => String(value)));
+        return;
+      }
+      const r = await bridge.setOption(live.key, configId, value);
+      if (!r.ok) {
+        throw new Error(translate('agent.settingFailed').replace('{setting}', () => option.name).replace('{value}', () => String(value))
+          .replace('{error}', () => r.error ?? translate('agent.settingRejected')));
+      }
+      const answered = r.result?.configOptions;
+      if (Array.isArray(answered) && answered.length) live.info.configOptions = answered;
+      else option.currentValue = value;
+    };
+    const picked = Object.entries(options);
+    const isModel = ([configId]: [string, unknown]) => live.info.configOptions?.find((o) => o.id === configId)?.category === 'model';
+    for (const entry of picked.filter(isModel)) await setOption(entry);
+    for (const entry of picked.filter((entry) => !isModel(entry))) await setOption(entry);
+    onOptions?.(live.info.configOptions);
+
+    /* where it is and how to work (the project, the `openfilm` manual, Studio already open) it was told when the
+       session started (apps/desktop src/agents.mjs INSTRUCTIONS): the message goes as the person wrote it */
     const r = await bridge.prompt(key, text, meta, images?.length ? images : undefined);
     /* The answer to the prompt can overtake its last updates (the closing words of its reply): stop
        listening only once they have stopped coming, or the saved reply ends mid-sentence. */

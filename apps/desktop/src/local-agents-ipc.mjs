@@ -51,7 +51,7 @@ import { recordProblem, problemsFile } from 'openfilm/problems';
 import { LOG_SETTLE_MS } from './agent-logs.mjs';
 import { RECORDED_AGENTS, agentRecordCalls, compactCalls, recordedModel } from './agent-records.mjs';
 import { skillStore } from './agent-skills.mjs';
-import { AGENTS, AgentSession, HARNESS_AGENTS, isAgentId, isChatAgent, listAgents, openAgentSignIn, probeFolder } from './agents.mjs';
+import { AGENTS, AgentSession, HARNESS_AGENTS, isAgentId, isChatAgent, listAgents, openAgentSignIn, optionsForModel, probeFolder } from './agents.mjs';
 import { loggedBlocks, logsDir, openLog, writeModelLog } from './chat-store.mjs';
 import { loginShellVariables } from './environment.mjs';
 
@@ -224,12 +224,20 @@ export function registerLocalAgentIpc(ipcMain, { trusted, binDir = null, fallbac
     try {
       /* its commands too (the composer's / menu), which it says just after the session opens: waited for a moment */
       let commands = null;
+      let options = null;
       let said = () => {};
       const heard = new Promise((done) => { said = done; });
       session = new AgentSession({ agent, cwd: probeFolder(), binDir, fallbackDir, env, harness: await harnessFor(agent),
-        onUpdate: (update) => { if (update?.sessionUpdate === 'available_commands_update') { commands = update.availableCommands ?? null; said(); } } });
-      const info = await session.start();
+        onUpdate: (update) => {
+          if (update?.sessionUpdate === 'available_commands_update') { commands = update.availableCommands ?? null; said(); }
+          if (update?.sessionUpdate === 'config_option_update') options = update.configOptions ?? null;
+        } });
+      let info = await session.start();
+      if (options) info = { ...info, configOptions: options };
+      options = null;
+      info = await optionsForModel(session, info, typeof opts?.model === 'string' ? opts.model : undefined);
       await Promise.race([heard, new Promise((done) => setTimeout(done, PROBE_COMMANDS_MS))]);
+      if (options) info = { ...info, configOptions: options };
       return { ok: true, info: { ...info, ...(commands ? { commands } : {}) } };
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e);

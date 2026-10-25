@@ -1,7 +1,76 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { AgentSession, CLIENT_CAPABILITIES, agentDefaults, closeEverySession, planProblem, probeFolder, CODEX_UTF8_CMD, agentShell, allowOption, codexDeveloperInstructions, codexLaunchEnv, distinctOptions, errorCause, legacyOptions, powerShellScript, powerShellLine, powerShellWindowLaunch, terminalScript, checkAgentProgram, readAgentStatus, setChosenPaths, signInScript, turnError, signInError, codexTooOld, AGENTS, ownSignIn, codexServiceError, codexRefusal, codexNotice, explainFailure, stderrReason, withToolKind, OWN_GROUP, stopTree, winArg } from './agents.mjs';
+import { AgentSession, CLIENT_CAPABILITIES, agentDefaults, closeEverySession, planProblem, probeFolder, CODEX_UTF8_CMD, agentShell, allowOption, codexDeveloperInstructions, codexLaunchEnv, distinctOptions, errorCause, legacyOptions, optionsForModel, powerShellScript, powerShellLine, powerShellWindowLaunch, terminalScript, checkAgentProgram, readAgentStatus, setChosenPaths, signInScript, turnError, signInError, codexTooOld, AGENTS, ownSignIn, codexServiceError, codexRefusal, codexNotice, explainFailure, stderrReason, withToolKind, OWN_GROUP, stopTree, winArg } from './agents.mjs';
 import { spawn } from 'node:child_process';
+import { acpSignedIn } from './agents.mjs';
+
+test('a fresh sign-in check bypasses a cached signed-out result and shares the pending probe', async () => {
+  const { mkdtempSync, readFileSync, writeFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dir = mkdtempSync(join(tmpdir(), 'of-auth-cache-'));
+  const signedIn = join(dir, 'signed-in');
+  const calls = join(dir, 'calls');
+  const program = join(dir, 'qwen.mjs');
+  writeFileSync(program, `
+    import { createInterface } from 'node:readline';
+    import { appendFileSync, existsSync } from 'node:fs';
+    const send = (message) => process.stdout.write(JSON.stringify(message) + '\\n');
+    createInterface({ input: process.stdin }).on('line', (line) => {
+      const request = JSON.parse(line);
+      if (request.method === 'initialize') send({ jsonrpc: '2.0', id: request.id, result: { protocolVersion: 1, agentCapabilities: {}, authMethods: [] } });
+      if (request.method === 'session/new') {
+        appendFileSync(${JSON.stringify(calls)}, 'check\\n');
+        setTimeout(() => send({ jsonrpc: '2.0', id: request.id, ...(existsSync(${JSON.stringify(signedIn)})
+          ? { result: { sessionId: 'auth-test' } } : { error: { code: -32000, message: 'Authentication required' } }) }), 30);
+      }
+    });
+  `);
+  setChosenPaths({ qwen: program });
+  try {
+    assert.equal(await acpSignedIn('qwen'), false);
+    writeFileSync(signedIn, 'yes');
+    assert.equal(await acpSignedIn('qwen'), false, 'normal background scans may reuse a cached negative');
+    const first = acpSignedIn('qwen', { fresh: true });
+    const second = acpSignedIn('qwen', { fresh: true });
+    assert.equal(first, second, 'focus and the login poll share the same running status check');
+    assert.equal(await first, true, 'the just-completed login is seen without waiting 15 seconds');
+    assert.equal(await acpSignedIn('qwen', { fresh: true }), true);
+    assert.equal(readFileSync(calls, 'utf8').trim().split('\n').length, 2, 'signed-in results remain cached');
+  } finally { setChosenPaths({}); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('an invalid parameter keeps the reason the agent supplied', () => {
+  const error = Object.assign(new Error('Invalid params'), { code: -32602, data: { details: 'This model does not support fast.' } });
+  const explained = errorCause(error);
+  assert.equal(explained.message, 'This model does not support fast.');
+  assert.equal(explained.cause, error);
+  assert.equal(errorCause(Object.assign(new Error('Invalid params'), { code: -32602 })).message, 'Invalid params');
+});
+
+test('the model picker opts into Cursor model parameters while retaining recommended values', () => {
+  assert.equal(CLIENT_CAPABILITIES._meta.parameterizedModelPicker, true);
+  assert.deepEqual(CLIENT_CAPABILITIES._meta.jetbrains.air.capabilities, ['recommendedValue']);
+});
+
+test('a menu probe selects the requested model before returning its effort options, without a prompt', async () => {
+  const info = { sessionId: 'probe', configOptions: [{ id: 'model', category: 'model', currentValue: 'plain', options: [{ value: 'plain' }, { value: 'reasoning' }] }] };
+  const calls = [];
+  const effort = { id: 'effort', category: 'thought_level', options: [{ value: 'default' }, { value: 'high' }] };
+  const session = { setConfigOption: async (...args) => {
+    calls.push(args);
+    return { configOptions: [{ ...info.configOptions[0], currentValue: args[1] }, effort] };
+  } };
+  assert.equal(await optionsForModel(session, info), info);
+  assert.equal(await optionsForModel(session, info, 'plain'), info);
+  assert.deepEqual(calls, []);
+  const selected = await optionsForModel(session, info, 'reasoning');
+  assert.deepEqual(calls, [['model', 'reasoning']]);
+  assert.equal(selected.configOptions[1], effort);
+  await assert.rejects(optionsForModel(session, info, 'missing'), /does not offer/);
+  assert.equal(calls.length, 1, 'an unavailable model is never sent to the agent');
+  await assert.rejects(optionsForModel({ setConfigOption: async () => ({ configOptions: info.configOptions }) }, info, 'reasoning'), /did not accept/);
+});
 
 test('an agent that asks: yes for good where it offers that, else yes this once; nothing to say yes with is null', () => {
   const options = [
@@ -127,7 +196,7 @@ test('a turn the agent ends with just "Internal error" says the reason in its da
   assert.equal(errorCause(said), said);
   const bare = Object.assign(new Error('Internal error'), { code: -32603, data: { errorKind: 'transport_lost' } });
   assert.equal(errorCause(bare), bare);
-  const other = Object.assign(new Error('Invalid params'), { code: -32602, data: { message: 'x' } });
+  const other = Object.assign(new Error('Method not found'), { code: -32601, data: { message: 'x' } });
   assert.equal(errorCause(other), other);
 });
 

@@ -19,6 +19,80 @@ const roster = (dataDir, fetch, extra = {}) => createRoster({
   ...extra,
 });
 
+test('focus publishes a fresh login before a slow full scan and ignores the scan\'s older signed-out result', async () => {
+  const qwen = (signedIn) => ({ id: 'qwen', cli: { path: '/bin/qwen' }, signedIn });
+  const scan = Promise.withResolvers();
+  let signedIn = false;
+  let slow = false;
+  const checks = [];
+  const r = roster(mkdtempSync(join(tmpdir(), 'of-fast-login-')), undefined, {
+    localAgents: async () => slow ? scan.promise : [qwen(signedIn)],
+    localAgent: async (id, options) => { checks.push([id, options]); return qwen(signedIn); },
+    signInWait: { ms: 10_000, pollMs: 5000 },
+  });
+  try {
+    await r.connect('qwen');
+    await new Promise((done) => setImmediate(done));
+    assert.equal(checks.length, 1, 'the first login check starts immediately, before the poll delay');
+    assert.equal(r.list().find((a) => a.id === 'qwen').status, 'waiting');
+    signedIn = true;
+    slow = true;
+    const refreshing = r.refresh();
+    await new Promise((done) => setImmediate(done));
+    assert.equal(r.list().find((a) => a.id === 'qwen').status, 'ready', 'focus does not wait for the full scan or the next poll');
+    assert.ok(checks.every(([id, options]) => id === 'qwen' && options.fresh === true));
+    scan.resolve([qwen(false)]);
+    await refreshing;
+    assert.equal(r.list().find((a) => a.id === 'qwen').status, 'ready', 'the old full scan cannot revert a completed login');
+  } finally { r.cancelSignIn('qwen'); scan.resolve([qwen(false)]); }
+});
+
+test('only the agent being signed in is asked fresh; other signed-out agents and installs keep cached answers', async () => {
+  const agent = (id, signedIn, cli = { path: `/bin/${id}` }) => ({ id, cli, signedIn });
+  const checks = [];
+  const r = roster(mkdtempSync(join(tmpdir(), 'of-fresh-login-')), undefined, {
+    localAgents: async () => [agent('codex', false), agent('qwen', false), agent('cursor', null, null)],
+    // The install is there at its first check, so its wait ends at once.
+    localAgent: async (id, options) => { checks.push([id, options?.fresh === true]); return id === 'cursor' ? agent('cursor', null) : agent(id, false); },
+    openInstaller: async () => ({ ok: true }),
+    signInWait: { ms: 10_000, pollMs: 5000 },
+  });
+  try {
+    await r.refresh();
+    await r.refresh();
+    assert.deepEqual(checks, [], 'a shown, connected, signed-out agent is not asked fresh on every refresh');
+    await r.connect('qwen');
+    await new Promise((done) => setImmediate(done));
+    await r.refresh();
+    assert.ok(checks.length >= 1);
+    assert.ok(checks.every(([id, fresh]) => id === 'qwen' && fresh), `only the agent being signed in is asked fresh: ${JSON.stringify(checks)}`);
+    checks.length = 0;
+    await r.install('cursor');
+    await new Promise((done) => setImmediate(done));
+    assert.deepEqual(checks, [['cursor', false]], 'an install wait uses the cached sign-in answers');
+  } finally { r.cancelSignIn('qwen'); }
+});
+
+test('focus and login polling share a status check, and cancelling ignores its late answer', async () => {
+  const qwen = (signedIn) => ({ id: 'qwen', cli: { path: '/bin/qwen' }, signedIn });
+  const pending = Promise.withResolvers();
+  let checks = 0;
+  const r = roster(mkdtempSync(join(tmpdir(), 'of-fast-login-')), undefined, {
+    localAgents: async () => [qwen(false)],
+    localAgent: async () => { checks++; return pending.promise; },
+    signInWait: { ms: 10_000, pollMs: 5000 },
+  });
+  try {
+    await r.connect('qwen');
+    await Promise.all([r.refresh(), r.refresh(), r.refresh()]);
+    assert.equal(checks, 1);
+    r.cancelSignIn('qwen');
+    pending.resolve(qwen(true));
+    await new Promise((done) => setImmediate(done));
+    assert.equal(r.list().find((a) => a.id === 'qwen').status, 'sign-in');
+  } finally { r.cancelSignIn('qwen'); pending.resolve(qwen(false)); }
+});
+
 test('each API format is asked in its own shape, with a picture', () => {
   const r = probeRequest('responses', 'https://api.openai.com/v1/', 'k', 'm');
   assert.equal(r.url, 'https://api.openai.com/v1/responses');
@@ -386,6 +460,84 @@ test('Start again while a sign-in is waited for opens its sign-in again, and the
   signedIn = true;
   await after(60);
   assert.equal(status(), 'ready');
+});
+
+test('closing the login terminal restores sign-in even while an authentication probe is stuck', async () => {
+  const qwen = (signedIn) => ({ id: 'qwen', cli: { path: '/bin/qwen' }, signedIn });
+  const pending = Promise.withResolvers();
+  const started = Promise.withResolvers();
+  let open = true;
+  let probes = 0;
+  const r = roster(mkdtempSync(join(tmpdir(), 'of-roster-')), undefined, {
+    localAgents: async () => [qwen(false)],
+    localAgent: async () => { probes++; started.resolve(); return pending.promise; },
+    openSignIn: async () => ({ ok: true, isOpen: async () => open }),
+    signInWait: { ms: 2000, pollMs: 5 },
+  });
+  const status = () => r.list().find((a) => a.id === 'qwen').status;
+  try {
+    await r.connect('qwen');
+    await started.promise;
+    assert.equal(status(), 'waiting');
+    open = false;
+    for (let i = 0; i < 100 && status() === 'waiting'; i++) await new Promise((done) => setTimeout(done, 5));
+    assert.equal(status(), 'sign-in', 'closing the terminal does not wait for the authentication probe or the 15 minute timeout');
+    pending.resolve(qwen(true));
+    await new Promise((done) => setTimeout(done, 30));
+    assert.equal(status(), 'sign-in', 'a stale probe cannot overwrite the cancelled wait');
+    assert.equal(probes, 1, 'polling stops after the terminal closes');
+  } finally {
+    r.cancelSignIn('qwen');
+    pending.resolve(qwen(false));
+  }
+});
+
+test('cancelling sign-in restores the login state without disconnecting or waiting for an outstanding probe', async () => {
+  const qwen = (signedIn) => ({ id: 'qwen', cli: { path: '/bin/qwen' }, signedIn });
+  const pending = Promise.withResolvers();
+  const started = Promise.withResolvers();
+  const dir = mkdtempSync(join(tmpdir(), 'of-roster-'));
+  const r = roster(dir, undefined, {
+    localAgents: async () => [qwen(false)],
+    localAgent: async () => { started.resolve(); return pending.promise; },
+    signInWait: { ms: 2000, pollMs: 5 },
+  });
+  await r.connect('qwen');
+  await started.promise;
+  r.cancelSignIn('qwen');
+  assert.equal(r.list().find((a) => a.id === 'qwen').status, 'sign-in');
+  assert.equal(readChoices(dir).disconnected.includes('qwen'), false);
+  pending.resolve(qwen(true));
+  await new Promise((done) => setTimeout(done, 20));
+  assert.equal(r.list().find((a) => a.id === 'qwen').status, 'sign-in');
+  await r.connect('qwen');
+  for (let i = 0; i < 100 && r.list().find((a) => a.id === 'qwen').status === 'waiting'; i++) await new Promise((done) => setTimeout(done, 5));
+  assert.equal(r.list().find((a) => a.id === 'qwen').status, 'ready', 'sign-in can be started again and complete normally');
+});
+
+test('an old login terminal closing after Start again does not cancel the new login', async () => {
+  const qwen = { id: 'qwen', cli: { path: '/bin/qwen' }, signedIn: false };
+  const windows = [];
+  const r = roster(mkdtempSync(join(tmpdir(), 'of-roster-')), undefined, {
+    localAgents: async () => [qwen], localAgent: async () => qwen,
+    openSignIn: async () => {
+      const window = { open: true };
+      windows.push(window);
+      return { ok: true, isOpen: async () => window.open };
+    },
+    signInWait: { ms: 2000, pollMs: 5 },
+  });
+  const status = () => r.list().find((a) => a.id === 'qwen').status;
+  try {
+    await r.connect('qwen');
+    await r.connect('qwen');
+    windows[0].open = false;
+    await new Promise((done) => setTimeout(done, 30));
+    assert.equal(status(), 'waiting');
+    windows[1].open = false;
+    for (let i = 0; i < 100 && status() === 'waiting'; i++) await new Promise((done) => setTimeout(done, 5));
+    assert.equal(status(), 'sign-in');
+  } finally { r.cancelSignIn('qwen'); }
 });
 
 test("an agent found only as its maker's app: the app said, and its installer run in a terminal and waited for until it is there", async () => {

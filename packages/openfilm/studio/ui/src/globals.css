@@ -407,6 +407,9 @@ body.tl-scrubbing * {
   cursor: col-resize !important;
 }
 
+/* Keep the reference-selection cursor while dragging beyond the ruler. */
+body.tl-pinning, body.tl-pinning * { cursor: crosshair !important; }
+
 /* The range bar: 10px to hit, a 4px thumb that thickens to 8px under the pointer, colored from the text. */
 .tl-range-thumb {
   top: 50% !important;

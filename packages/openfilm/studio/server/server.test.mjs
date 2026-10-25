@@ -526,6 +526,29 @@ test('a project whose folder is gone says so, never takes Studio down, and can b
   assert.ok(!(await (await api('/api/projects')).json()).projects.some((p) => p.id === project.id));
 });
 
+test('a removed film is unavailable before opening or editing; remaining files are preserved on removal', async () => {
+  const { project } = await (await api('/api/projects', { method: 'POST', body: { path: join(scratch, 'Film removed externally') } })).json();
+  rmSync(join(project.path, 'film.html'));
+  writeFileSync(join(project.path, 'keep.txt'), 'remaining work');
+  for (const [rest, options] of [
+    ['', {}],
+    ['/opened', { method: 'POST' }],
+    ['/files', {}],
+    ['/edit', { method: 'POST', body: { ops: [{ op: 'insert', clip: { src: 'title.html' } }] } }],
+  ]) {
+    const response = await api(`/api/projects/${project.id}${rest}`, options);
+    assert.equal(response.status, 410, rest || 'opening the project');
+    assert.equal((await response.json()).code, 'missing-film');
+  }
+  assert.ok(!existsSync(join(project.path, 'film.html')), 'opening or editing never recreates the removed film');
+  const listed = (await (await api('/api/projects')).json()).projects.find((p) => p.id === project.id);
+  assert.equal(listed.missing, true);
+  assert.equal(listed.missingReason, 'film');
+  assert.equal((await api(`/api/projects/${project.id}`, { method: 'DELETE' })).status, 200);
+  assert.equal(readFileSync(join(project.path, 'keep.txt'), 'utf8'), 'remaining work');
+  assert.equal((await api('/api/health')).status, 200);
+});
+
 test('a page gone mid-request (its connection reset) ends only its own stream, never Studio', async () => {
   const { port } = new URL(studio.origin);
   const upgrade = (path, key) => `GET ${path} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n`

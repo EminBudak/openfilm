@@ -13,7 +13,7 @@ export interface StudioVersion { version: string; latest: string | null; newer: 
   update?: { status: 'updating' | 'failed'; version: string; error?: string } }
 
 /** `cover`: when the person set a cover of its own (studio/server/cover.mjs), absent when it has none. */
-export type Project = { id: string; path: string; name: string; openedAt: number; missing: boolean; working?: boolean; cover?: number };
+export type Project = { id: string; path: string; name: string; openedAt: number; missing: boolean; missingReason?: 'folder' | 'film'; working?: boolean; cover?: number };
 export type Clip = { src: string; id: string; at?: number; time?: [number] | [number, number];
   box?: { x: number; y: number; w?: number; h?: number; r?: number }; volume?: number; speed?: number; overrides?: unknown[];
   /** a page that sets no size of its own: the px it is laid out at (the stage's without it) */
@@ -199,7 +199,7 @@ export type StudioNotice = { id: string; kind: 'balance'; provider: string; prov
 export type FolderEvent = { type: 'film'; rev: string } | { type: 'files'; paths?: string[] } | { type: 'history' } | { type: 'export'; job: ExportJob } | { type: 'open'; to: string }
   | { type: 'history-progress'; op: string; phase: string; done: number; total: number }
   | { type: 'ask'; ask: SpendAsk } | { type: 'asked'; id: string } | { type: 'notice'; notice: StudioNotice } | { type: 'project'; project: Project }
-  /* the project was deleted, or its folder is not there any more: its pages leave it */
+  /* the project was deleted, or its folder or film file is missing: its pages leave it */
   | { type: 'gone' };
 
 /**
@@ -313,7 +313,7 @@ export function projectEvents(id: string, on: (event: FolderEvent) => void): () 
     /* back after Studio was away: the film, the files and the history may all have changed meanwhile */
     const stop = listen(`${p(id)}/events`, tell, {
       onBack: () => { tell({ type: 'film', rev: '' }); tell({ type: 'files' }); tell({ type: 'history' }); },
-      /* the project off the list, or its folder missing: gone (a list that can't be read says nothing) */
+      /* off the list, or missing its folder or film file: gone (an unreadable list says nothing) */
       gone: () => call<{ projects: Project[] }>('projects').then((r) => { const found = r.projects.find((x) => x.id === id); return !found || Boolean(found.missing); }),
     });
     stream = { stop, listeners };

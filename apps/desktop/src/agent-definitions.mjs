@@ -11,7 +11,7 @@ const definitions = {
   qwen: { name: 'Qwen Code', install: 'https://github.com/QwenLM/qwen-code' },
   kimi: { name: 'Kimi', install: 'https://www.kimi.com/code/docs/en/kimi-code-cli/guides/getting-started.html' },
   minimax: { name: 'MiniMax Code', install: 'https://www.npmjs.com/package/@minimax-ai/code' },
-  deepseek: { name: 'DeepSeek Harness', install: 'https://github.com/deepseek-ai/deepseek-harness' },
+  deepseek: { name: 'DeepSeek Harness', install: 'https://www.deepseek.com/harness/' },
   byok: { name: 'Own key', install: null },
 };
 

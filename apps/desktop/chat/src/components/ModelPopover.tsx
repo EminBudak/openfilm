@@ -75,7 +75,7 @@ export function ModelPopover({ placement = 'bottom', align = 'start', agent: con
   const [open, setOpen] = React.useState(false);
   /** the option whose side menu is open */
   const [side, setSide] = React.useState<string | null>(null);
-  /** how far the card has slid left to make room for a side menu: it only grows while the menu is open */
+  /** how far the card has slid left to make room for a side menu; kept within the window on resize */
   const [cardShift, setCardShift] = React.useState(0);
   const [sideStyle, setSideStyle] = React.useState<React.CSSProperties | null>(null);
   const cardRef = React.useRef<HTMLDivElement | null>(null);
@@ -147,30 +147,58 @@ export function ModelPopover({ placement = 'bottom', align = 'start', agent: con
   /* a fixed row's one value is already the one in use */
   const pickChoice = (o: Option, value: unknown) => { if (!o.fixed) { la.setPref(agent, o.id, value); onPref?.(agent, o.id, value); } };
 
-  /* the side menu beside its row: on the right of the card, the card sliding left when the window is too narrow for
-     both, and over the card's right edge only when it cannot slide far enough; measured again once it is drawn */
+  /* Keep the side menu beside its row and inside the window, including when an agent adds choices while it is open
+     or the window's height changes. Measure again after width/height constraints change the rendered menu. */
   const sidePainted = sideStyle !== null;
   React.useLayoutEffect(() => {
     const card = cardRef.current;
     const row = choosing ? rowRefs.current[choosing.id] : null;
-    if (!open || !choosing || !card || !row) { setSideStyle(null); return; }
-    const c = card.getBoundingClientRect();
     const el = sideRef.current;
-    const sideMax = Math.max(0, room - c.width);
-    const w = Math.min(sideMax, Math.max(SIDE_MIN_W, el?.offsetWidth ?? SIDE_MIN_W));
-    const h = el?.offsetHeight ?? 8 + (choosing.options?.length ?? 0) * 28;
-    const width = window.innerWidth;
-    const height = window.innerHeight;
-    let left = c.right + SIDE_GAP;
-    const need = left + w - (width - EDGE);
-    if (need > 0) {
-      const slide = Math.min(need, Math.max(0, c.left - EDGE));
-      if (slide > 0) setCardShift((s) => s + slide);
-      left = Math.max(EDGE, Math.min(left - slide, width - EDGE - w));
-    }
-    let top = row.getBoundingClientRect().top - 4;
-    if (top + h > height - EDGE) top = Math.max(EDGE, height - EDGE - h);
-    setSideStyle({ position: 'fixed', left, top, zIndex: 10001, minWidth: Math.min(SIDE_MIN_W, sideMax), width: 'max-content', maxWidth: sideMax, maxHeight: height - 2 * EDGE });
+    if (!open || !choosing || !card || !row || !el) { setSideStyle(null); return; }
+    const update = () => {
+      const c = card.getBoundingClientRect();
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      const sideMax = Math.max(0, width - 2 * EDGE - SIDE_GAP - c.width);
+      const minWidth = Math.min(SIDE_MIN_W, sideMax);
+      const maxHeight = Math.max(0, height - 2 * EDGE);
+      const w = Math.min(sideMax, Math.max(minWidth, el.offsetWidth));
+      const h = Math.min(el.offsetHeight, maxHeight);
+      const baseLeft = c.left + cardShift;
+      let shift = Math.min(cardShift, Math.max(0, baseLeft - EDGE));
+      let left = c.right + cardShift - shift + SIDE_GAP;
+      const need = left + w - (width - EDGE);
+      if (need > 0) {
+        const slide = Math.min(need, Math.max(0, baseLeft - shift - EDGE));
+        shift += slide;
+        left -= slide;
+      }
+      if (shift !== cardShift) setCardShift(shift);
+      left = Math.max(EDGE, Math.min(left, width - EDGE - w));
+      const top = Math.max(EDGE, Math.min(row.getBoundingClientRect().top - 4, height - EDGE - h));
+      setSideStyle((previous) => previous?.left === left && previous.top === top && previous.minWidth === minWidth
+        && previous.maxWidth === sideMax && previous.maxHeight === maxHeight ? previous
+        : { position: 'fixed', left, top, zIndex: 10001, minWidth, width: 'max-content', maxWidth: sideMax, maxHeight });
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    observer.observe(card);
+    observer.observe(row);
+    // The parent Popover also moves on resize/scroll. Read after its React update has committed.
+    let frame = 0;
+    const schedule = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(update);
+    };
+    window.addEventListener('resize', schedule);
+    window.addEventListener('scroll', schedule, true);
+    return () => {
+      observer.disconnect();
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener('resize', schedule);
+      window.removeEventListener('scroll', schedule, true);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by the open row
   }, [open, choosing?.id, cardShift, sidePainted, room]);
 
@@ -270,7 +298,7 @@ export function ModelPopover({ placement = 'bottom', align = 'start', agent: con
             ) : rows.map((o, i) => (
               <React.Fragment key={o.id}>
                 {i > 0 ? <div className="mx-1 my-0.5 h-px bg-[var(--border)]" /> : null}
-                <button type="button" ref={(el) => { rowRefs.current[o.id] = el; }} aria-haspopup="menu" aria-expanded={side === o.id}
+                <button type="button" data-agent-option={o.id} ref={(el) => { rowRefs.current[o.id] = el; }} aria-haspopup="menu" aria-expanded={side === o.id}
                   onMouseDown={keepFocus} onMouseEnter={() => showSide(o.id)} onMouseLeave={hideSideSoon} onFocus={() => showSide(o.id)}
                   onClick={() => showSide(o.id)}
                   className={`${ROW_BASE} ${side === o.id ? 'bg-[var(--bg-hover)]' : 'hover:bg-[var(--bg-hover)]'}`}>

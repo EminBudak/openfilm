@@ -405,8 +405,8 @@ const ConversationTurn = React.memo(function ConversationTurn({
           turns it off). No "version N · switch to it" link: going back belongs to the top bar's history. */}
       {settled && showChanges && entry.fileChanges?.length ? <FileChangesList changes={entry.fileChanges} /> : null}
 
-      {/* Still running: one status line, always one line high, only its text changes (see StatusLine), and the
-          footer under it on hover (its Log is the turn so far). Done, the footer alone. Always there, in one place
+      {/* The status and hover actions occupy separate rows. An empty status takes no room; a visible status
+          stays above the complete footer, including on hover and focus. The footer stays in one place
           in the tree: a log opened from it stays open as the turn finishes. An interruption doesn't
           show Failed here: the reason and Resume appear above the composer (the last turn's, even after a
           restart); an older one's reason is on its footer's Interrupted, on hover. */}
@@ -649,14 +649,13 @@ function CopyButton({ text }: { text: string }) {
 
 /**
  * The line under a reply: copy, who answered (icon only) · the model · how long ago, and how it stopped if it
- * didn't finish normally. While it runs, under the status line: copy what it said so far, its log so far, who.
+ * didn't finish normally. While it runs, on hover below the status: copy what it said so far, its log so far, who.
  *
  * Several agents can answer in one project and their replies look alike, so the footer says which one. A stopped
  * turn says so, or a reply cut short leaves the reader unsure whether it finished, broke or was stopped.
  *
- * As in Claude, it appears on hover over the reply and keeps its space (h-6, as tall as the status line while
- * running, so the bottom edge stays put when one replaces the other). The time is how long ago; how long it
- * worked is in the "Worked …" line.
+ * It appears on hover over the reply and keeps its space (h-6), independently of the status above it.
+ * The time is how long ago; how long it worked is in the "Worked …" line.
  */
 function TurnFooter({ entry, items, running = false }: { entry: ProjectVersion; items: TranscriptItem[] | null; running?: boolean }) {
   const t = useT();
@@ -677,8 +676,7 @@ function TurnFooter({ entry, items, running = false }: { entry: ProjectVersion; 
   const project = React.useContext(ChatProjectContext);
 
   return (
-    /* -mt-1.5: the footer belongs to the reply above it — close to it, not a row of its own */
-    <div className={`-mt-1.5 flex h-6 min-w-0 items-center gap-1.5 text-[11.5px] text-[var(--chat-hint)] group-hover/reply:opacity-100 ${HOVER_LINE}`}>
+    <div data-turn-footer="" className={`-mt-1.5 flex h-6 min-w-0 items-center gap-1.5 text-[11.5px] text-[var(--chat-hint)] group-hover/reply:opacity-100 ${HOVER_LINE}`}>
       {answer ? <CopyButton text={answer} /> : null}
       {/* developer mode (Settings → Developer): the turn as it happened, every event; while it runs, as it goes */}
       {developer && project && !isPendingAssetId(entry.assetId) ? <TurnLogButton project={project} turnId={entry.assetId} live={running} /> : null}

@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('openfilmNative', {
   agents: {
     list: () => ipcRenderer.invoke('desktop:agents:list'),
     connect: (id) => ipcRenderer.invoke('desktop:agents:connect', { id }),
+    cancelSignIn: (id) => ipcRenderer.invoke('desktop:agents:cancel-sign-in', { id }),
     disconnect: (id) => ipcRenderer.invoke('desktop:agents:disconnect', { id }),
     usage: (id, fresh) => ipcRenderer.invoke('desktop:agents:usage', { id, fresh: fresh === true }),
     setShown: (id, shown) => ipcRenderer.invoke('desktop:agents:shown', { id, shown: shown === true }),
@@ -71,7 +72,7 @@ contextBridge.exposeInMainWorld('openfilmNative', {
     list: () => ipcRenderer.invoke('desktop:local-agents:list'),
     signIn: (agent) => invoke('desktop:local-agents:sign-in')({ agent }),
     disconnect: (agent) => invoke('desktop:local-agents:disconnect')({ agent }),
-    probe: (agent) => invoke('desktop:local-agents:probe')({ agent }),
+    probe: (agent, model) => invoke('desktop:local-agents:probe')({ agent, model }),
     start: (agent, cwd, resume, meta) => invoke('desktop:local-agents:start')({ agent, cwd, resume, meta }),
     prompt: (key, text, meta, images) => invoke('desktop:local-agents:prompt')({ key, text, meta, images }),
     running: () => ipcRenderer.invoke('desktop:local-agents:running'),
