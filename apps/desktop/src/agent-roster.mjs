@@ -160,7 +160,8 @@ export function probeRequest(format, baseUrl, key, model) {
 
 /**
  * Whether a model reads pictures: one request with a picture in it, in the format's own shape. Resolves `{ ok }` or the
- * service's own words for what went wrong (a model that cannot take pictures is said so).
+ * service's own words for what went wrong (a model that cannot take pictures is said so, and so is a web page where the
+ * API should be).
  * @param {{ format: string, baseUrl: string, key: string, model: string, fetch?: typeof fetch }} o
  */
 export async function probeModel({ format, baseUrl, key, model, fetch: fetchImpl = fetch }) {
@@ -171,12 +172,15 @@ export async function probeModel({ format, baseUrl, key, model, fetch: fetchImpl
   } catch (e) {
     return { ok: false, error: `The service could not be reached: ${e instanceof Error ? e.message : String(e)}` };
   }
-  if (res.ok) return { ok: true };
+  /* a web page answers an address that is a site's, not an API's (or a sign-in page in front of one), whatever its status */
+  const page = /text\/html/i.test(res.headers.get('content-type') ?? '');
+  if (res.ok && !page) return { ok: true };
   const body = await res.text().catch(() => '');
   let message = body;
   try { message = JSON.parse(body)?.error?.message ?? body; } catch { /* not JSON */ }
   message = String(message).slice(0, 300);
   if (res.status === 401 || res.status === 403) return { ok: false, error: 'The service did not accept this key.' };
+  if (page || /^\s*</.test(body)) return { ok: false, error: `${req.url} answers with a web page (${res.status}), not the API: check the address and the API format.` };
   if (/image|vision|multimodal|modalit/i.test(message)) return { ok: false, error: 'This model cannot read pictures, and the agent has to look at its frames: choose one that does.', code: 'no-images' };
   if (res.status === 404 && !/model/i.test(message)) return { ok: false, error: `Nothing answers at ${req.url}: check the address and the API format.` };
   return { ok: false, error: message || `The service answered ${res.status}.` };

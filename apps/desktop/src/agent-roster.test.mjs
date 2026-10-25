@@ -52,6 +52,24 @@ test('a model is kept only once its service took the key with a picture; one tha
   assert.equal(JSON.stringify(readChoices(dir)).includes('sk-good'), false, 'never in the choices file');
 });
 
+test('an address that answers with a web page is said so, not shown as its HTML, and nothing is kept', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'of-roster-'));
+  let answer = { status: 405, type: 'text/html', body: '<!doctype html><html lang="en"><head><title>Example Domain</title></head></html>' };
+  const fetch = async () => new Response(answer.body, { status: answer.status, headers: { 'content-type': answer.type } });
+  const r = roster(dir, fetch);
+  const save = () => r.saveOwnModel({ format: 'responses', baseUrl: 'https://example.com/v1', model: 'm', key: 'sk-1234' });
+  const refused = await save();
+  assert.equal(refused.ok, false);
+  assert.equal(refused.error, 'https://example.com/v1/responses answers with a web page (405), not the API: check the address and the API format.');
+  /* a page that answers 200 is not the model taking the picture, and one that mentions images is not a model refusing it */
+  answer = { status: 200, type: 'text/html; charset=utf-8', body: '<html><head><meta property="og:image" content="card.png"></head></html>' };
+  assert.match((await save()).error, /web page \(200\)/);
+  /* an HTML error page sent as text */
+  answer = { status: 502, type: 'text/plain', body: '<html><body>Bad gateway</body></html>' };
+  assert.match((await save()).error, /web page \(502\)/);
+  assert.equal(readChoices(dir).byok, null, 'nothing kept');
+});
+
 test('each model is its own service with its own key; a key left empty is the one of another model on that address', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'of-roster-'));
   const r = roster(dir, async () => new Response('{}', { status: 200 }));
