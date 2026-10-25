@@ -291,14 +291,77 @@ async function rendererOf(browser) {
   try { return await page.evaluate(readRenderer); } finally { await page.close(); }
 }
 
+/* two seconds of video, red then blue, 640 × 360 at 4 fps, large enough to be decoded on the chip: H.264, and HEVC
+   Main 10 (what phones and cameras such as DJI's record) */
+const PRESENT_CHECKS = [
+  { type: 'video/mp4; codecs="avc1.4D401E"', src: 'data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAANkbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAB9AAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAArN0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAB9AAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAoAAAAFoAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAfQAAAgAAABAAAAAAIrbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAABAAAAAkABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAAB1m1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAZZzdGJsAAAAunN0c2QAAAAAAAAAAQAAAKphdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAoABaABIAAAASAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGP//AAAAMGF2Y0MBTUAW/+EAGGdNQBbsoFAX/LgIgAAAAwCAAAAEB4sWywEABWjr48sgAAAAEHBhc3AAAAABAAAAAQAAABRidHJ0AAAAAAAAD8QAAAUMAAAAGHN0dHMAAAAAAAAAAQAAAAgAABAAAAAAGHN0c3MAAAAAAAAAAgAAAAEAAAAFAAAAQGN0dHMAAAAAAAAABgAAAAEAACAAAAAAAQAAQAAAAAACAAAQAAAAAAEAACAAAAAAAQAAQAAAAAACAAAQAAAAABxzdHNjAAAAAAAAAAEAAAABAAAACAAAAAEAAAA0c3RzegAAAAAAAAAAAAAACAAAAGYAAAAWAAAAEwAAABMAAABlAAAAFgAAABMAAAATAAAAFHN0Y28AAAAAAAAAAQAAA5QAAAA9dWR0YQAAADVtZXRhAAAAAAAAACFoZGxyAAAAAAAAAABtZGlyYXBwbAAAAAAAAAAAAAAAAAhpbHN0AAAACGZyZWUAAAFLbWRhdAAAAGJliIQAEv/+6Mn8yysv49Q3s0Yps0mnHMI9HTDq9Ryj5DaMReURDAAAAwAAAwAAAwDAA6AsaXWRAN14AAAGSADXhLQmodQXAagd4oI6hTCAEAAAAwAAAwAAAwAAAwAAAwAW8QAAABJBmiNsQQ/+qlUAAAMAAAMAOqAAAAAPQZ5BeIIfAAADAAADACThAAAADwGeYmpBDwAAAwAAAwAk4AAAAGFliIIABX/+7M9+BTcgPIv1lAh0tW5145jTpoZ4rq/03qFxGMOPJbgAAAMAAAMAAAXj8myN92IA8GNgAAAakALcEDCABQhFRBxGhnCVELHSMkAAAAMAAAMAAAMAAAMAAEBBAAAAEkGaI2xBD/6qVQAAAwAAAwA6oQAAAA9BnkF4gj8AAAMAAAMAE3EAAAAPAZ5iakEPAAADAAADACTh' },
+  { type: 'video/mp4; codecs="hvc1.2.4.L90.90"', src: 'data:video/mp4;base64,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' },
+];
+
+/**
+ * Whether this browser shows a paused video's frame once sought, for each kind of video it plays. On some Windows
+ * computers with Vulkan the frame sought is never the one shown (every seek waits out its tries in showVideoAt,
+ * timeline.mjs: five seconds a frame), or nothing is shown at all (a black video), for some only with HEVC. A video
+ * this browser does not play or load says nothing either way: such footage gets a copy it plays (seekable.mjs).
+ * @param {import('playwright-core').Browser} browser
+ */
+export async function presentsVideo(browser) {
+  const page = await browser.newPage();
+  try {
+    return await page.evaluate(async (checks) => {
+      for (const { type, src } of checks) {
+        const v = document.createElement('video');
+        if (!v.canPlayType(type) || typeof v.requestVideoFrameCallback !== 'function') continue;
+        v.muted = true;
+        v.style.cssText = 'width:320px;height:180px';
+        document.body.append(v);
+        const loaded = await new Promise((done) => {
+          v.addEventListener('loadeddata', () => done(true), { once: true });
+          v.addEventListener('error', () => done(false), { once: true });
+          setTimeout(() => done(false), 5000);
+          v.src = src;
+        });
+        /* the frame shown must be the one sought (each is a quarter second); a seek just after the file loaded may
+           never present it (see showVideoAt), so it is tried again, elsewhere */
+        let shown = !loaded;
+        for (const t of loaded ? [1.5, 0.5, 1.25] : []) {
+          shown = await new Promise((done) => {
+            const next = () => v.requestVideoFrameCallback((now, meta) => (Math.abs(meta.mediaTime - t) < 0.125 ? done(true) : next()));
+            next();
+            setTimeout(() => done(false), 1500);
+            v.currentTime = t;
+          });
+          if (shown) break;
+        }
+        v.remove();
+        if (!shown) return false;
+      }
+      return true;
+    }, PRESENT_CHECKS);
+  } finally {
+    await page.close();
+  }
+}
+
+/** The device id in an ANGLE renderer string (`(0x00002489)`), the same GPU's through Vulkan and D3D11. */
+const deviceOf = (/** @type {string} */ renderer) => {
+  const id = /\(0x([0-9a-f]+)\)/i.exec(renderer);
+  return id ? parseInt(id[1], 16) : null;
+};
+
 /**
  * Windows: headless Chromium picks no ANGLE backend by itself and draws WebGL with SwiftShader, on the CPU. Vulkan
  * reaches the GPU (on a laptop with two, the discrete one: d3d11 and gl take the integrated one). A virtual machine, a
  * CI runner or a computer without a Vulkan driver has none, so the first browser reads its renderer once: when Vulkan
  * did not start, or is software too, it and every later browser take Chromium's default.
+ *
+ * Vulkan on a GPU may still never show a video's frames (presentsVideo). Then the default is taken when it reaches the
+ * same GPU (a computer with one), else Vulkan with videos decoded on the CPU; each only when it shows them. When
+ * neither does, the default.
  * @param {(browser: import('playwright-core').Browser) => Promise<string>} [renderer]
+ * @param {(browser: import('playwright-core').Browser) => Promise<boolean>} [presents]
  */
-export function vulkanFirst(renderer = rendererOf) {
+export function vulkanFirst(renderer = rendererOf, presents = presentsVideo) {
   /** @type {Promise<string[]> | null} what every browser after the first is opened with */
   let chosen = null;
   /** @param {(angle: string[]) => Promise<import('playwright-core').Browser>} open */
@@ -307,16 +370,36 @@ export function vulkanFirst(renderer = rendererOf) {
     /** @type {(angle: string[]) => void} */
     let choose = () => {};
     chosen = new Promise((r) => { choose = r; });
+    const read = (/** @type {import('playwright-core').Browser} */ b) => inTime(renderer(b), 30_000, 'no renderer').catch(() => 'none');
+    const shows = (/** @type {import('playwright-core').Browser} */ b) => inTime(presents(b), 30_000, '').catch(() => true);
     const vulkan = ['--use-angle=vulkan'];
     const browser = await open(vulkan).catch(() => null);
-    const gpu = browser ? await inTime(renderer(browser), 30_000, 'no renderer').catch(() => 'none') : 'none';
-    if (browser && gpu !== 'none' && !SOFTWARE_GL.test(gpu)) {
+    const gpu = browser ? await read(browser) : 'none';
+    if (!browser || gpu === 'none' || SOFTWARE_GL.test(gpu)) {
+      await browser?.close().catch(() => {});
+      choose([]);
+      return open([]);
+    }
+    if (await shows(browser)) {
       choose(vulkan);
       return browser;
     }
-    await browser?.close().catch(() => {});
+    await browser.close().catch(() => {});
+    const fallback = await open([]);
+    if (deviceOf(gpu) != null && deviceOf(await read(fallback)) === deviceOf(gpu) && await shows(fallback)) {
+      choose([]);
+      return fallback;
+    }
+    const decoded = [...vulkan, '--disable-accelerated-video-decode'];
+    const cpu = await open(decoded).catch(() => null);
+    if (cpu && await shows(cpu)) {
+      await fallback.close().catch(() => {});
+      choose(decoded);
+      return cpu;
+    }
+    await cpu?.close().catch(() => {});
     choose([]);
-    return open([]);
+    return fallback;
   };
 }
 const onWindows = vulkanFirst();
