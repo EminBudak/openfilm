@@ -1255,10 +1255,14 @@ function fullProject() {
   put('.git/HEAD');
   put('node_modules/x/index.js');
   put('.DS_Store');
-  /* footage linked in from elsewhere: the export carries the file itself */
+  /* footage linked in from elsewhere: the export carries the file itself (links need Developer Mode on Windows:
+     without it the footage is a copy) */
   const outside = join(dir, '..', 'shoot.mov');
   writeFileSync(outside, 'footage');
-  symlinkSync(outside, join(dir, 'assets', 'shoot.mov'));
+  try { symlinkSync(outside, join(dir, 'assets', 'shoot.mov')); } catch (e) {
+    if (e.code !== 'EPERM') throw e;
+    writeFileSync(join(dir, 'assets', 'shoot.mov'), 'footage');
+  }
   return dir;
 }
 

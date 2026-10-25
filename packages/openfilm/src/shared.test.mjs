@@ -111,13 +111,16 @@ test('fileOf: a sound stays inside the film\'s folder, however its path is writt
     /* a slash hidden as %2F is decoded after the URL resolved its `..`: the join must not walk out */
     assert.throws(() => fileOf(ws, 'film.html', 'x%2F..%2F..%2Foutside.mp3'), /outside the film's folder/);
     assert.throws(() => fileOf(ws, 'film.html', '%2E%2E%2Foutside.mp3'), /outside the film's folder/);
-    /* a link inside the folder that leads out of it */
-    symlinkSync(join(root, 'outside.mp3'), join(ws, 'assets', 'link.mp3'));
-    assert.throws(() => fileOf(ws, 'film.html', 'assets/link.mp3'), /link out of the film's folder/);
+    /* a link inside the folder that leads out of it (links need Developer Mode on Windows: there the rest of the
+       test stands) */
+    if (process.platform !== 'win32') {
+      symlinkSync(join(root, 'outside.mp3'), join(ws, 'assets', 'link.mp3'));
+      assert.throws(() => fileOf(ws, 'film.html', 'assets/link.mp3'), /link out of the film's folder/);
+    }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('fileOf: a link to media the person linked is followed; a link a project brought from elsewhere is not', () => {
+test('fileOf: a link to media the person linked is followed; a link a project brought from elsewhere is not', { skip: process.platform === 'win32' && 'links need Developer Mode on Windows' }, () => {
   /* the places the person linked are kept in Studio's home: this test's own */
   const home = process.env.OPENFILM_HOME;
   const root = mkdtempSync(join(tmpdir(), 'openfilm-fileof-links-'));
