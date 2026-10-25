@@ -171,7 +171,7 @@ const SEEK_TRIES = 3;
  * moment the new frame is presented. Knowing how long the video's frames last (`frame`, from the host), the frame for t
  * is told by its time: the old frame, shown again as its video turns visible, is not taken for it, even after the seek
  * is done. Not knowing, a frame presented before the seek is done is taken for the old one when it is nearer where the
- * video was.
+ * video was. Whether the frame was seen on screen (false: every try ran out).
  */
 async function showVideoAt(v, t, frame = null) {
   /* a seek still under way (the start a video was woken at, see wake): its `seeked` and its frame would be taken for
@@ -179,7 +179,7 @@ async function showVideoAt(v, t, frame = null) {
   if (v.seeking) await new Promise((done) => { v.addEventListener('seeked', done, { once: true }); setTimeout(done, 10000); });
   /* the same time again (to the microsecond the element keeps): no seek, nothing new to present (a seek there would
      present nothing, and the wait would run out) */
-  if (!v.seeking && Math.abs(v.currentTime - t) < SAME_TIME && v.readyState >= 2) return;
+  if (!v.seeking && Math.abs(v.currentTime - t) < SAME_TIME && v.readyState >= 2) return true;
   const before = v.currentTime;
   let sought = false;
   /* the frame a seek to t lands in starts at most a frame before t (and the seek goes a millisecond in, see host.mjs),
@@ -213,9 +213,12 @@ async function showVideoAt(v, t, frame = null) {
     const shown = presented ? await presented : true;
     clearTimeout(timer);
     if (handle) v.cancelVideoFrameCallback?.(handle);
-    if (shown || last) return;
+    if (shown || last) return shown;
   }
 }
+
+/** Exact frames of video clips seen on screen, and ones never seen (a host tells a browser that shows no video by it). */
+const videoSeen = { shown: 0, unshown: 0 };
 
 /**
  * Every video a page moved in its frame, until its new frame is on screen (SPEC §4: a host waits for pending seeks):
@@ -971,7 +974,9 @@ async function drawClip(c, t, live, play, turn, coming, going) {
        be presented, yet the picture keeps the frame it had for a second or so (Chromium, its frames sent apart from
        the page's): the same t drew two pictures */
     if (appears) await frames(2);
-    await showVideoAt(c.el, want, await frameOf(c));
+    /* one without a picture (a sound in a video clip) has no frame to show */
+    if (await showVideoAt(c.el, want, await frameOf(c))) videoSeen.shown++;
+    else if (c.el.videoWidth > 0) videoSeen.unshown++;
     return;
   }
   /* a page closed while the playhead was far (see near): opened again, then drawn; one that will not open is the
@@ -990,6 +995,8 @@ async function drawClip(c, t, live, play, turn, coming, going) {
   c.drawn = true;
   override(c, c.preview ?? c.overrides);
 }
+
+window.__filmVideos = () => ({ ...videoSeen });
 
 window.film = {
   get duration() { return Math.max(0.001, ...clips.filter((c) => !c.hidden).map((c) => c.end)); },

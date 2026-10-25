@@ -355,17 +355,19 @@ const deviceOf = (/** @type {string} */ renderer) => {
  * CI runner or a computer without a Vulkan driver has none, so the first browser reads its renderer once: when Vulkan
  * did not start, or is software too, it and every later browser take Chromium's default.
  *
- * Vulkan on a GPU may still never show a video's frames (presentsVideo). Then the default is taken when it reaches the
- * same GPU (a computer with one), else Vulkan with videos decoded on the CPU; each only when it shows them. When
- * neither does, the default.
+ * Vulkan on a GPU may still never show a video's frames (presentsVideo). Then Direct3D is taken when it reaches the
+ * same GPU (a computer with one), else Vulkan with videos decoded on the CPU, else Direct3D on the other GPU; each only
+ * when it shows them. When none does, the default.
  * @param {(browser: import('playwright-core').Browser) => Promise<string>} [renderer]
  * @param {(browser: import('playwright-core').Browser) => Promise<boolean>} [presents]
  */
 export function vulkanFirst(renderer = rendererOf, presents = presentsVideo) {
   /** @type {Promise<string[]> | null} what every browser after the first is opened with */
   let chosen = null;
+  /* false once a film's videos were never seen in Vulkan's browsers (videoNotShown): its check is not trusted again */
+  let vulkanVideo = true;
   /** @param {(angle: string[]) => Promise<import('playwright-core').Browser>} open */
-  return async (open) => {
+  const pick = async (open) => {
     if (chosen) return open(await chosen);
     /** @type {(angle: string[]) => void} */
     let choose = () => {};
@@ -380,29 +382,57 @@ export function vulkanFirst(renderer = rendererOf, presents = presentsVideo) {
       choose([]);
       return open([]);
     }
-    if (await shows(browser)) {
+    if (vulkanVideo && await shows(browser)) {
       choose(vulkan);
       return browser;
     }
     await browser.close().catch(() => {});
-    const fallback = await open([]);
-    if (deviceOf(gpu) != null && deviceOf(await read(fallback)) === deviceOf(gpu) && await shows(fallback)) {
-      choose([]);
-      return fallback;
+    /* Direct3D, asked for by name (the default is SwiftShader, on the CPU): first on the same GPU, a computer with one */
+    const d3d11 = ['--use-angle=d3d11'];
+    const direct = await open(d3d11).catch(() => null);
+    const directGpu = direct ? await read(direct) : 'none';
+    /** @type {boolean | null} */
+    let directShows = null;
+    const directShown = async () => (directShows ??= Boolean(direct) && await shows(/** @type {import('playwright-core').Browser} */ (direct)));
+    if (deviceOf(gpu) != null && deviceOf(directGpu) === deviceOf(gpu) && await directShown()) {
+      choose(d3d11);
+      return /** @type {import('playwright-core').Browser} */ (direct);
     }
+    /* then Vulkan with videos decoded on the CPU: pages stay on its GPU, the discrete one on a laptop with two (#64) */
     const decoded = [...vulkan, '--disable-accelerated-video-decode'];
     const cpu = await open(decoded).catch(() => null);
     if (cpu && await shows(cpu)) {
-      await fallback.close().catch(() => {});
+      await direct?.close().catch(() => {});
       choose(decoded);
       return cpu;
     }
     await cpu?.close().catch(() => {});
+    /* then Direct3D on the other GPU, still not the CPU */
+    if (direct && directGpu !== 'none' && !SOFTWARE_GL.test(directGpu) && await directShown()) {
+      choose(d3d11);
+      return direct;
+    }
+    await direct?.close().catch(() => {});
     choose([]);
-    return fallback;
+    return open([]);
   };
+  /**
+   * A film's video frames were never seen in browsers opened with Vulkan, though its check passed (footage it does
+   * not tell, as the check's clips do): the browsers opened from now on take the next way. Whether there was one.
+   */
+  pick.videoNotShown = async () => {
+    const was = chosen && await chosen;
+    if (!was || was.join() !== '--use-angle=vulkan') return false;
+    vulkanVideo = false;
+    chosen = null;
+    return true;
+  };
+  return pick;
 }
 const onWindows = vulkanFirst();
+
+/** A film's video frames were never seen (FilmPage.seek): on Windows, browsers opened from now on show video another way. */
+export const videoNotShown = () => (process.platform === 'win32' ? onWindows.videoNotShown() : Promise.resolve(false));
 
 /** Every browser launch() opened and that is still open. */
 const LIVE = new Set();
@@ -426,6 +456,10 @@ const CAPTURE_MS = 30_000;
 
 /** A frame that threw inside the page: the film's fault, reported as such rather than as a crash of the tool. */
 export class FrameError extends Error {}
+/** A film whose video frames this browser never showed, drawn again in browsers that show video another way. */
+export class VideoNotShown extends FrameError {}
+/** How many exact frames of video may go unseen, none seen yet, before the browser counts as showing no video. */
+const UNSEEN_VIDEO = 3;
 
 /**
  * `work`, or a FrameError saying `why` once `ms` pass. The limit is kept here, not in the page: a page whose code
@@ -469,9 +503,10 @@ const stuck = async (/** @type {import('playwright-core').Page} */ page) =>
 
 /** One web page in one browser tab. */
 export class FilmPage {
-  static async open(browser, origin, entry, { scale = 1, size = null, transparent = false, black = false, offline = false, network = {}, waitMs = 10_000, readyMs = READY_MS } = {}) {
+  static async open(browser, origin, entry, { scale = 1, size = null, transparent = false, black = false, offline = false, network = {}, waitMs = 10_000, readyMs = READY_MS, onVideoNotShown = videoNotShown } = {}) {
     const film = new FilmPage();
     film.problems = [];
+    film.onVideoNotShown = onVideoNotShown;
     film.browser = browser;
     film.origin = origin;
     film.entry = entry;
@@ -586,6 +621,7 @@ export class FilmPage {
         : null));
       // two frames: the first commits style and layout, the second lets layers (filters, 3D) finish rasterizing
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+      return window.__filmVideos?.() ?? null;
     }, t).catch((e) => {
       const why = String(e.message).replace(/^page\.evaluate: /, '').split('\n')[0].replace(/^Error: /, '');
       /* files that failed, by their path in the folder, once, and not the ones the reason names already */
@@ -597,7 +633,12 @@ export class FilmPage {
       throw new FrameError(`${said}${failed.length ? ` (failed to load: ${failed.join(', ')})` : ''}`);
     });
     const why = `frame(${Number(t.toFixed(3))}) did not finish within ${timeoutMs / 1000} s`;
-    await inTime(drawn, timeoutMs, why).catch(async (e) => { throw e.message === why ? new FrameError(`${why}${await stuck(this.page)}`) : e; });
+    const videos = await inTime(drawn, timeoutMs, why).catch(async (e) => { throw e.message === why ? new FrameError(`${why}${await stuck(this.page)}`) : e; });
+    /* every seek waited out (five seconds a frame) and the picture black: when browsers can show video another way,
+       the film is drawn again in those */
+    if (videos && videos.shown === 0 && videos.unshown >= UNSEEN_VIDEO && await this.onVideoNotShown()) {
+      throw new VideoNotShown(`this browser never showed the film's video frames (${videos.unshown} sought): video is shown another way from now on`);
+    }
   }
 
   /** PNG (or JPEG) of the viewport as composited. */

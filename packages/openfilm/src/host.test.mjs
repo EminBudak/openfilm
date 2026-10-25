@@ -178,43 +178,68 @@ test('Windows: Vulkan when its renderer is a GPU, read once; otherwise the defau
   assert.equal(never.count, 0);
 });
 
-test('Windows: when Vulkan never shows a video frame, the same GPU by default, else Vulkan decoding on the CPU, else the default', async () => {
+test('Windows: when Vulkan never shows a video frame, Direct3D on the same GPU, else Vulkan decoding on the CPU, else Direct3D on the other GPU, else the default', async () => {
   const vulkan = ['--use-angle=vulkan'];
+  const d3d11 = ['--use-angle=d3d11'];
   const cpu = [...vulkan, '--disable-accelerated-video-decode'];
   const nvidia = 'ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA GeForce RTX 4050 Laptop GPU (0x000028A1)), NVIDIA)';
   const nvidiaD3d = 'ANGLE (NVIDIA, NVIDIA GeForce RTX 4050 Laptop GPU (0x000028A1) Direct3D11 vs_5_0 ps_5_0, D3D11)';
   const intelD3d = 'ANGLE (Intel, Intel(R) UHD Graphics (0x0000A7A8) Direct3D11 vs_5_0 ps_5_0, D3D11)';
-  /** Browsers by what they are opened with: the default's renderer, and which ones show a video's frames. */
-  const machine = (/** @type {string} */ fallbackGpu, /** @type {string[][]} */ showing) => {
+  const swiftShader = 'ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)';
+  /** Browsers by what they are opened with: Direct3D's renderer, and which ones show a video's frames. */
+  const machine = (/** @type {string} */ direct, /** @type {string[][]} */ showing) => {
     const opened = /** @type {string[][]} */ ([]), closed = /** @type {string[][]} */ ([]);
     const open = async (/** @type {string[]} */ angle) => {
       opened.push(angle);
       return /** @type {any} */ ({ angle, close: async () => { closed.push(angle); } });
     };
-    const renderer = async (/** @type {any} */ b) => (b.angle.length ? nvidia : fallbackGpu);
+    const renderer = async (/** @type {any} */ b) => (b.angle[0] === '--use-angle=vulkan' ? nvidia : b.angle.length ? direct : swiftShader);
     const presents = async (/** @type {any} */ b) => showing.some((a) => a.join() === b.angle.join());
     return { pick: vulkanFirst(renderer, presents), open, opened, closed };
   };
 
-  /* one GPU: D3D11 reaches it and shows the frames */
-  let m = machine(nvidiaD3d, [[]]);
-  assert.deepEqual((await m.pick(m.open)).angle, []);
-  assert.deepEqual((await m.pick(m.open)).angle, []);
-  assert.deepEqual(m.opened, [vulkan, [], []]);
+  /* one GPU: Direct3D reaches it and shows the frames */
+  let m = machine(nvidiaD3d, [d3d11]);
+  assert.deepEqual((await m.pick(m.open)).angle, d3d11);
+  assert.deepEqual((await m.pick(m.open)).angle, d3d11);
+  assert.deepEqual(m.opened, [vulkan, d3d11, d3d11]);
   assert.deepEqual(m.closed, [vulkan]);
 
-  /* two GPUs (#64): the default is the integrated one, so Vulkan stays, its videos decoded on the CPU */
-  m = machine(intelD3d, [[], cpu]);
+  /* two GPUs (#64): Direct3D takes the integrated one, so Vulkan stays, its videos decoded on the CPU */
+  m = machine(intelD3d, [d3d11, cpu]);
   assert.deepEqual((await m.pick(m.open)).angle, cpu);
   assert.deepEqual((await m.pick(m.open)).angle, cpu);
-  assert.deepEqual(m.opened, [vulkan, [], cpu, cpu]);
-  assert.deepEqual(m.closed, [vulkan, []]);
+  assert.deepEqual(m.opened, [vulkan, d3d11, cpu, cpu]);
+  assert.deepEqual(m.closed, [vulkan, d3d11]);
 
-  /* nothing shows them: the default, as without a GPU */
+  /* only Direct3D on the integrated GPU shows them: that, rather than the CPU */
+  m = machine(intelD3d, [d3d11]);
+  assert.deepEqual((await m.pick(m.open)).angle, d3d11);
+  assert.deepEqual(m.opened, [vulkan, d3d11, cpu]);
+  assert.deepEqual(m.closed, [vulkan, cpu]);
+
+  /* nothing shows them: the default */
   m = machine(intelD3d, []);
   assert.deepEqual((await m.pick(m.open)).angle, []);
-  assert.deepEqual(m.opened, [vulkan, [], cpu]);
-  assert.deepEqual(m.closed, [vulkan, cpu]);
+  assert.deepEqual(m.opened, [vulkan, d3d11, cpu, []]);
+  assert.deepEqual(m.closed, [vulkan, cpu, d3d11]);
+});
+
+test('Windows: a film whose video Vulkan never showed, though its check passed, moves every later browser to the next way, once', async () => {
+  const vulkan = ['--use-angle=vulkan'];
+  const opened = /** @type {string[][]} */ ([]);
+  const open = async (/** @type {string[]} */ angle) => { opened.push(angle); return /** @type {any} */ ({ angle, close: async () => {} }); };
+  const renderer = async (/** @type {any} */ b) => (b.angle.length
+    ? 'ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA GeForce RTX 4050 Laptop GPU (0x000028A1)), NVIDIA)'
+    : 'ANGLE (NVIDIA, NVIDIA GeForce RTX 4050 Laptop GPU (0x000028A1) Direct3D11 vs_5_0 ps_5_0, D3D11)');
+  const pick = vulkanFirst(renderer, async () => true);
+  assert.deepEqual((await pick(open)).angle, vulkan);
+  assert.equal(await pick.videoNotShown(), true);
+  /* Direct3D on the same GPU, its check not asked of Vulkan again */
+  assert.deepEqual((await pick(open)).angle, ['--use-angle=d3d11']);
+  assert.deepEqual((await pick(open)).angle, ['--use-angle=d3d11']);
+  assert.deepEqual(opened, [vulkan, vulkan, ['--use-angle=d3d11'], ['--use-angle=d3d11']]);
+  assert.equal(await pick.videoNotShown(), false, 'no other way left to move to');
 });
 
 test('a browser shows a paused video\'s frame once sought; one that never presents it is told', { timeout: 60_000 }, async () => {

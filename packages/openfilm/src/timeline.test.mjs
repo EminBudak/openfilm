@@ -5,7 +5,7 @@ import { cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { FilmPage, launch, serve } from './host.mjs';
+import { FilmPage, launch, serve, VideoNotShown } from './host.mjs';
 import { open } from './shared.mjs';
 import { filmHead, filmHtml } from './film-doc.mjs';
 
@@ -392,6 +392,32 @@ test('a sought frame that is decoded but never presented (a seek just after load
     assert.ok(seen.ms < 2500, `${Math.round(seen.ms)} ms`);
   } finally {
     await s.close();
+  }
+});
+
+test('a browser that never shows a film\'s video frames: after a few, the film is drawn again where video is shown another way, when there is one', { skip: !hasFfmpeg && 'no ffmpeg', timeout: 120_000 }, async () => {
+  const dir = footage('of-never-shown-');
+  writeFileSync(join(dir, 'film.html'), filmHtml({ stage: { w: 320, h: 180 }, tracks: [{ clips: [{ id: 'v', src: 'a.mp4', time: [0, 4] }] }] }));
+  const site = await serve(dir);
+  const browser = await launch();
+  try {
+    let asked = 0;
+    const film = await FilmPage.open(browser, site.url, 'film.html', { onVideoNotShown: async () => { asked++; return true; } });
+    await film.page.evaluate(() => { HTMLVideoElement.prototype.requestVideoFrameCallback = () => 0; });
+    await film.seek(0.5);
+    await film.seek(1.5);
+    await assert.rejects(film.seek(2.5), (e) => e instanceof VideoNotShown && /never showed the film's video frames \(3 sought\)/.test(e.message));
+    assert.equal(asked, 1);
+    assert.deepEqual(await film.page.evaluate(() => window.__filmVideos()), { shown: 0, unshown: 3 });
+    await film.close();
+    /* with no other way (not Windows, or moved already) it goes on as before */
+    const as = await FilmPage.open(browser, site.url, 'film.html', { onVideoNotShown: async () => false });
+    await as.page.evaluate(() => { HTMLVideoElement.prototype.requestVideoFrameCallback = () => 0; });
+    for (const t of [0.5, 1.5, 2.5]) await as.seek(t);
+    await as.close();
+  } finally {
+    await browser.close();
+    await site.close();
   }
 });
 

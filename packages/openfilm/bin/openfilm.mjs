@@ -160,7 +160,12 @@ if (RAW[0] === 'get') {
        while nothing else wants it */
     render: () => {
       try { setPriority(10); } catch { /* not allowed here: as it is */ }
-      return import('../src/render.mjs').then((m) => m.render(args, opts));
+      /* a film whose video this browser never showed is drawn once more, in browsers that show video another way */
+      return import('../src/render.mjs').then((m) => m.render(args, opts).catch(async (e) => {
+        if (!(e instanceof (await import('../src/host.mjs')).VideoNotShown)) throw e;
+        console.error(`openfilm: ${e.message}: drawn again`);
+        return m.render(args, opts);
+      }));
     },
     update: () => import('../studio/client.mjs').then((m) => m.updateOpenfilm((line) => console.error(line))),
     skills: () => import('../src/skills-cli.mjs').then((m) => m.skillsCommand(RUN)),
