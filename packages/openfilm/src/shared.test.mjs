@@ -4,7 +4,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { COMMAND_ROOM, audioClips, checkSound, fadeFilter, ffmpeg, fileOf, mix, mixGraph } from './shared.mjs';
+import { COMMAND_ROOM, audioChannels, audioClips, checkSound, fadeFilter, ffmpeg, fileOf, mix, mixGraph } from './shared.mjs';
 import { addLinkedPlaces } from './media-links.mjs';
 
 test('an ffmpeg that does not end is stopped, and says what did not finish', { timeout: 20_000 }, async () => {
@@ -196,6 +196,19 @@ test('a mix of hundreds of sounds keeps its command short: its graph goes in a f
     assert.ok(Math.abs(seconds - 15) < 0.01, `${seconds} s`);
     assert.ok(levelAt(out, 7.525) > 0.01 && levelAt(out, 7.575) < levelAt(out, 7.525) * 2, 'a tick where one plays');
     assert.deepEqual(readdirSync(dir).filter((f) => f.endsWith('.filter')), [], 'the graph file is gone');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a file made again at the same path is asked again for its sound: one that was silent can have it now', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'openfilm-channels-'));
+  try {
+    const file = join(dir, 'clip.mp4');
+    spawnSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=black:s=64x64:d=1', '-pix_fmt', 'yuv420p', file]);
+    assert.equal(audioChannels(file), 0);
+    spawnSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=black:s=64x64:d=1', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', '-pix_fmt', 'yuv420p', '-shortest', file]);
+    assert.equal(audioChannels(file), 1);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -158,9 +158,10 @@ function loadSettings(language: string): Settings {
       ...DEFAULTS,
       ...raw,
       presets: Array.isArray(raw.presets) ? raw.presets.filter((id) => exportPreset(id)) : DEFAULTS.presets,
-      video: { ...DEFAULTS.video, ...raw.video },
+      /* sound starts on each time: switched off for one export and kept, every later one came out silent unnoticed */
+      video: { ...DEFAULTS.video, ...raw.video, audio: true },
       gif: { ...DEFAULTS.gif, ...raw.gif },
-      alpha: { ...DEFAULTS.alpha, ...raw.alpha },
+      alpha: { ...DEFAULTS.alpha, ...raw.alpha, audio: true },
       audio: { ...DEFAULTS.audio, ...raw.audio },
       nle,
       subtitles: { ...DEFAULTS.subtitles, ...raw.subtitles },
@@ -226,6 +227,8 @@ export interface ExportCenterProps {
   film?: {
     scenes: readonly { startMs: number; durMs: number; label: string; src?: string }[];
     sounds: readonly { kind: Exclude<StemKind, 'footage'>; durMs: number; src?: string }[];
+    /** Video clips not probed yet: the film is not known to be silent while there are any. */
+    unprobed?: number;
   } | null;
   /** Where the playhead is: the poster is that frame (the middle of the film without it). */
   playheadMs?: number;
@@ -308,7 +311,8 @@ export function ExportCenter(props: ExportCenterProps) {
     () => new Set<StemKind>((film?.sounds ?? []).filter((x) => x.durMs > 0).map((x) => (x.src && VIDEO_SRC.test(x.src) ? 'footage' : x.kind))),
     [film],
   );
-  const knownSilent = film != null && soundKinds.size === 0;
+  /* silent only when every video's file said it has no sound: one not probed yet (or that failed to be) may have */
+  const knownSilent = film != null && soundKinds.size === 0 && !film.unprobed;
 
   const blocks = React.useMemo(() => props.mgBlocks ?? [], [props.mgBlocks]);
   const captions = captionCount ?? 0;
