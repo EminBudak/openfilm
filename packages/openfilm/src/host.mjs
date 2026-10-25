@@ -132,11 +132,13 @@ export function folderFiles(root, { inject = `<script>${HOST_FLAG}</script>`, ti
     /* A cancelled preview is normal: pipeline closes its file; its callback deliberately ignores the error. */
     const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '');
     if (range && (range[1] || range[2])) {
-      /* `bytes=-500` is the last 500 bytes. An open end (`bytes=X-`) is at most the next 8 MiB: one response must
+      /* `bytes=-500` is the last 500 bytes. An open end (`bytes=X-`) is at most the next 2 MiB: one response must
          not hold a connection for the rest of a long file. A browser keeps six HTTP/1.1 connections to a host, and
-         a frame's duration lookup waits behind them until one is free. */
+         a frame's duration lookup waits behind them until one is free. A paused video stops reading once it has
+         buffered enough and leaves the rest of its piece unread: pieces of 8 MiB still held all six with more than
+         six videos awake; pieces of 2 MiB are read to their end. */
       const start = range[1] ? Number(range[1]) : Math.max(0, stat.size - Number(range[2]));
-      const end = range[1] && !range[2] ? Math.min(start + 8 * 1024 * 1024 - 1, stat.size - 1)
+      const end = range[1] && !range[2] ? Math.min(start + 2 * 1024 * 1024 - 1, stat.size - 1)
         : range[1] && range[2] ? Math.min(Number(range[2]), stat.size - 1) : stat.size - 1;
       if (start > end || start >= stat.size) { res.writeHead(416, { ...headers, 'content-range': `bytes */${stat.size}` }).end(); return true; }
       res.writeHead(206, { ...headers, 'content-range': `bytes ${start}-${end}/${stat.size}`, 'content-length': end - start + 1 });
@@ -402,6 +404,7 @@ export class FilmPage {
       const why = r.failure()?.errorText ?? 'failed';
       if (why === 'net::ERR_ABORTED' && r.resourceType() === 'media') return; // media elements cancel range requests routinely
       if (why === 'net::ERR_ABORTED' && r.method() === 'HEAD') return; // a file's presence asked (timeline.mjs): its status is the answer
+      if (why === 'net::ERR_ABORTED' && new URL(r.url()).pathname.endsWith('/__film/frame-duration')) return; // given up on after 10 s (timeline.mjs frameOf): the frame is drawn from the guess
       if (why === 'net::ERR_BLOCKED_BY_CLIENT') return; // reported by the offline route with its reason
       problems.push({ kind: 'request', message: `${why} ${r.url()}` });
     });

@@ -1086,3 +1086,23 @@ test('an exact frame is drawn when the frame duration never answers', { skip: !h
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('a frame-duration lookup given up on is not a problem: the frame is drawn from the guess', { skip: !hasFfmpeg && 'no ffmpeg', timeout: 40_000 }, async () => {
+  const dir = footage('of-duration-held-');
+  writeFileSync(join(dir, 'film.html'), filmHtml({ stage: { w: 320, h: 180 }, tracks: [{ clips: [{ id: 'v', src: 'a.mp4', time: [0, 4] }] }] }));
+  const s = await open(dir);
+  try {
+    /* held, never answered: frameOf gives it up after 10 s */
+    await s.film.page.route('**/__film/frame-duration?*', () => {});
+    const given = s.film.page.waitForEvent('requestfailed', {
+      predicate: (request) => new URL(request.url()).pathname.endsWith('/__film/frame-duration'), timeout: 25_000,
+    });
+    await Promise.all([s.film.seek(0.4), given]);
+    const [video] = await videosNow(s.film);
+    assert.ok(video.shown && video.ready && Math.abs(video.time - 0.4) < 0.01, JSON.stringify(video));
+    assert.deepEqual(s.film.problems, []);
+  } finally {
+    await s.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

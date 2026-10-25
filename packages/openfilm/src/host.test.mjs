@@ -61,8 +61,8 @@ test('cancelled media requests close their files so the project can be renamed',
   }
 });
 
-test('an open-ended media range returns at most 8 MiB', async () => {
-  const cap = 8 * 1024 * 1024;
+test('an open-ended media range returns at most 2 MiB', async () => {
+  const cap = 2 * 1024 * 1024;
   const dir = mkdtempSync(join(tmpdir(), 'of-host-range-'));
   const data = Buffer.alloc(cap + 2, '0123456789');
   writeFileSync(join(dir, 'video.mp4'), data);
