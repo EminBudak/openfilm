@@ -18,6 +18,16 @@ import { filmHtml } from '../../src/film-doc.mjs';
 
 const hasFfmpeg = (() => { try { execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); return true; } catch { return false; } })();
 const ffmpeg = { skip: !hasFfmpeg && 'no ffmpeg', timeout: 120_000 };
+/** The processes started by `parent` whose command matches `pattern`: pgrep's, or on Windows the system's process list. */
+function children(parent, pattern) {
+  if (process.platform !== 'win32') return spawnSync('pgrep', ['-P', String(parent), '-f', pattern], { encoding: 'utf8' }).stdout.trim().split('\n').filter(Boolean).map(Number);
+  const listed = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+    `Get-CimInstance Win32_Process -Filter 'ParentProcessId=${parent}' | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }`], { encoding: 'utf8', timeout: 20_000, windowsHide: true });
+  if (listed.status !== 0) throw new Error(`the process list did not answer: ${listed.error?.message ?? listed.stderr}`);
+  return listed.stdout.split(/\r?\n/).filter((line) => new RegExp(pattern).test(line.slice(line.indexOf(' ') + 1))).map((line) => Number(line.split(' ')[0]));
+}
+/* the tests that end an export's processes find them in the process list, which on Windows (WMI) can stop answering */
+const processes = { skip: process.platform === 'win32' && (() => { try { children(process.pid, '.'); return false; } catch { return 'the process list does not answer'; } })() };
 let root, scratch;
 
 before(() => {
@@ -205,18 +215,18 @@ test('a full disk is said plainly, whichever words ffmpeg or the system use for 
   assert.equal(done.error, 'the disk is full: free up some space, then export again');
 });
 
-test('a renderer that dies fails its export with the reason, and exports go on', { ...ffmpeg, skip: ffmpeg.skip || (process.platform === 'win32' && 'no pgrep') }, async () => {
+test('a renderer that dies fails its export with the reason, and exports go on', { ...ffmpeg, skip: ffmpeg.skip || processes.skip }, async () => {
   const exports = createExports();
   const job = exports.start(project('Crash'), { kind: 'video' });
   await until(exports, job.id, (j) => j.status === 'running' && j.out);
   /* the film renders in a process of its own: ended from outside, as a crash would end it */
-  let pid = '';
+  let pid = 0;
   for (let i = 0; i < 200 && !pid; i++) {
-    pid = spawnSync('pgrep', ['-P', String(process.pid), '-f', 'render-worker'], { encoding: 'utf8' }).stdout.trim().split('\n')[0];
+    [pid] = children(process.pid, 'render-worker');
     if (!pid) await new Promise((r) => setTimeout(r, 25));
   }
   assert.ok(pid, 'a render process is running');
-  process.kill(Number(pid), 'SIGKILL');
+  process.kill(pid, 'SIGKILL');
   const failed = await ended(exports, job);
   assert.equal(failed.status, 'failed');
   assert.match(failed.error, /renderer stopped/);
@@ -224,15 +234,15 @@ test('a renderer that dies fails its export with the reason, and exports go on',
   assert.equal((await ended(exports, again)).status, 'done');
 });
 
-test('a video whose browser is ended partway, as a crash would end it, is drawn again and done', { ...ffmpeg, skip: ffmpeg.skip || (process.platform === 'win32' && 'no pgrep') }, async () => {
+test('a video whose browser is ended partway, as a crash would end it, is drawn again and done', { ...ffmpeg, skip: ffmpeg.skip || processes.skip }, async () => {
   const exports = createExports();
   const job = exports.start(project('Browser crash'), { kind: 'video' });
   await until(exports, job.id, (j) => j.status === 'running' && j.out);
   /** @type {number[]} */
   let browsers = [];
   for (let i = 0; i < 400 && !browsers.length; i++) {
-    const [worker] = spawnSync('pgrep', ['-P', String(process.pid), '-f', 'render-worker'], { encoding: 'utf8' }).stdout.trim().split('\n').filter(Boolean).map(Number);
-    if (worker) browsers = spawnSync('pgrep', ['-P', String(worker), '-f', 'chrom'], { encoding: 'utf8' }).stdout.trim().split('\n').filter(Boolean).map(Number);
+    const [worker] = children(process.pid, 'render-worker');
+    if (worker) browsers = children(worker, 'chrom');
     if (!browsers.length) await new Promise((r) => setTimeout(r, 25));
   }
   assert.ok(browsers.length, 'the film draws in a browser of the render process');
@@ -1036,10 +1046,8 @@ document.body.style.background='hsl('+Math.round(${hue}+t*60)+',70%,40%)'}}</scr
   mkdirSync(drafts, { recursive: true });
   return { dir, drafts, exports: createExports({ captions: subtitles, drafts: (app) => (app === 'jianying' ? drafts : null) }) };
 }
-/** The processes started by `parent` whose command matches `pattern`. */
-const children = (parent, pattern) => spawnSync('pgrep', ['-P', String(parent), '-f', pattern], { encoding: 'utf8' }).stdout.trim().split('\n').filter(Boolean).map(Number);
 
-test('剪映: the pages\' browsers, ended partway as a crash would end them, are started again and the draft is whole', { ...ffmpeg, timeout: 240_000, skip: ffmpeg.skip || (process.platform === 'win32' && 'no pgrep') }, async () => {
+test('剪映: the pages\' browsers, ended partway as a crash would end them, are started again and the draft is whole', { ...ffmpeg, timeout: 240_000, skip: ffmpeg.skip || processes.skip }, async () => {
   const { dir, exports } = threePages('Crashing browsers');
   const job = exports.start(project('Crashing browsers', dir), { kind: 'nle', format: 'jianying', fps: 30, subtitles: false });
   await until(exports, job.id, (j) => ['done', 'failed', 'cancelled'].includes(j.status) || (j.framesDone ?? 0) > 20);
@@ -1054,7 +1062,7 @@ test('剪映: the pages\' browsers, ended partway as a crash would end them, are
   for (const id of ['a', 'b', 'c']) assert.equal(frameCount(join(dirname(done.out), 'media', `${id}.mov`)), 120, `${id}: every frame`);
 });
 
-test('剪映: the process drawing the pages, ended partway, fails the draft with the reason and leaves nothing', { ...ffmpeg, timeout: 240_000, skip: ffmpeg.skip || (process.platform === 'win32' && 'no pgrep') }, async () => {
+test('剪映: the process drawing the pages, ended partway, fails the draft with the reason and leaves nothing', { ...ffmpeg, timeout: 240_000, skip: ffmpeg.skip || processes.skip }, async () => {
   const { dir, drafts, exports } = threePages('Crashing drawer');
   const job = exports.start(project('Crashing drawer', dir), { kind: 'nle', format: 'jianying', fps: 30, subtitles: false });
   await until(exports, job.id, (j) => ['done', 'failed', 'cancelled'].includes(j.status) || (j.framesDone ?? 0) > 20);
@@ -1067,7 +1075,7 @@ test('剪映: the process drawing the pages, ended partway, fails the draft with
   assert.deepEqual(readdirSync(drafts), [], 'no draft, and no part of one');
 });
 
-test('剪映: a draft cancelled partway stops drawing at once, its browsers closed, nothing left', { ...ffmpeg, timeout: 240_000, skip: ffmpeg.skip || (process.platform === 'win32' && 'no pgrep') }, async () => {
+test('剪映: a draft cancelled partway stops drawing at once, its browsers closed, nothing left', { ...ffmpeg, timeout: 240_000, skip: ffmpeg.skip || processes.skip }, async () => {
   const { dir, drafts, exports } = threePages('Cancelled draft');
   const job = exports.start(project('Cancelled draft', dir), { kind: 'nle', format: 'jianying', fps: 30, subtitles: false });
   await until(exports, job.id, (j) => ['done', 'failed', 'cancelled'].includes(j.status) || (j.framesDone ?? 0) > 20);
