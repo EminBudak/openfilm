@@ -606,7 +606,12 @@ export function ProjectView({ projectId, onProject, onLeave }: {
   /* the film's length: the preview's, unless it could not draw the film; that length is then of the film before
      (a clip that lost its length still counted at its old one), and the timeline's own reading of film.html stands,
      less the clips that have no length (drawn at a stand-in one) */
-  const totalMs = previewError ? blocksRef.current.reduce((end, b) => (b.noLength ? end : Math.max(end, Math.round(b.endMs))), 0) : drawnMs;
+  const totalMs = previewError || !info ? blocksRef.current.reduce((end, b) => (b.noLength ? end : Math.max(end, Math.round(b.endMs))), 0) : drawnMs;
+  /* before the preview is up (a long film still loading), that reading is the film's length too: the playhead moves
+     and plays at once, the picture and the sound join it as they come (see onInfo) */
+  React.useEffect(() => {
+    if (!info && totalMs > 0) player.current.duration = totalMs / 1000;
+  }, [info, totalMs]);
 
   /* ── the project's editor settings (`.film/settings.json`): its frame rate, its tracks' names ── */
   const [settings, setSettings] = React.useState<ProjectSettings | null>(null);
@@ -2862,7 +2867,8 @@ export function ProjectView({ projectId, onProject, onLeave }: {
                           height: `${(frameBox.inner.h / frameBox.h) * 100}%`,
                         }}>
                           <Preview ref={preview} folder={folder} stage={shownStage} time={() => player.current.time()} fps={exactRate(projectFps)}
-                            onInfo={onInfo} onKey={previewKey} onError={setPreviewError} onPlayed={onPlayed}>
+                            onInfo={onInfo} onKey={previewKey} onError={setPreviewError} onPlayed={onPlayed}
+                            onSpans={(next) => setInfo((had) => (had ? { ...had, spans: next } : had))}>
                             {!fullscreen ? (
                               <FilmStageSelect
                                 previewRef={preview}
@@ -3080,7 +3086,6 @@ export function ProjectView({ projectId, onProject, onLeave }: {
                     timeMs={timeMs}
                     clock={playing ? clock : null}
                     playing={playing}
-                    previewBar={previewRenders.bar}
                     onSeek={(ms) => seek(ms)}
                     onScrubPreview={scrubPreview}
                     onScrubCommit={scrubCommit}

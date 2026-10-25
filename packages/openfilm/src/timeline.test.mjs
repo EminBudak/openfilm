@@ -224,6 +224,45 @@ test('a missing file stops a film, said by its name; an editor\'s preview (film-
   }
 });
 
+test('an editor\'s preview is up without opening a page whose time is its length: it opens at its moment, its own length and size told then', { timeout: 60_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'of-unread-'));
+  writeFileSync(join(dir, 'a.html'), page('a', 2));
+  writeFileSync(join(dir, 'b.html'), page('b', 3));
+  writeFileSync(join(dir, 'film.html'), filmHtml({ stage: { w: 640, h: 360 }, tracks: [{ clips: [
+    { src: 'a.html', id: 'a' },
+    { src: 'b.html', id: 'b', at: 2, time: [0, 3] },
+  ] }] }));
+  const site = await serve(dir);
+  const browser = await launch();
+  const opened = (p) => p.evaluate(() => [...document.querySelectorAll('iframe')].map((el) => Boolean(el.contentWindow?.film)));
+  try {
+    /* an export, a check: every page opened before the film is up, as before */
+    const strict = await browser.newPage();
+    await strict.goto(`${site.url}/film.html`);
+    await strict.waitForFunction(() => Boolean(window.film));
+    await strict.evaluate(() => window.film.ready);
+    assert.deepEqual(await opened(strict), [true, true]);
+    const preview = await browser.newPage();
+    await preview.goto(`${site.url}/film.html?film-missing=skip`);
+    await preview.waitForFunction(() => Boolean(window.film));
+    await preview.evaluate(() => { window.learned = 0; window.__filmEditor.learned = () => { window.learned += 1; }; return window.film.ready; });
+    /* `a` has no time: opened for its length. `b`'s time is its length: its place known, the page not opened */
+    assert.deepEqual(await opened(preview), [true, false]);
+    assert.equal(await preview.evaluate(() => window.film.duration), 5);
+    assert.deepEqual(await preview.evaluate(() => window.__filmSpans().map((c) => [c.id, c.at, c.end, c.native, c.w, c.h, Boolean(c.reflows)])),
+      [['a', 0, 2, 2, 320, 180, false], ['b', 2, 5, null, 640, 360, true]]);
+    await preview.evaluate(() => window.__filmEditor.watch(3));
+    assert.deepEqual(await opened(preview), [true, true]);
+    assert.deepEqual(await preview.evaluate(() => window.__filmSpans().map((c) => [c.id, c.at, c.end, c.native, c.w, c.h, Boolean(c.reflows)])),
+      [['a', 0, 2, 2, 320, 180, false], ['b', 2, 5, 3, 320, 180, false]], 'opened: its own length and size');
+    assert.equal(await preview.evaluate(() => window.learned), 1, 'the editor told once');
+    assert.equal(await preview.evaluate(() => document.querySelectorAll('iframe')[1].style.visibility), 'visible');
+  } finally {
+    await browser.close();
+    await site.close();
+  }
+});
+
 const hasFfmpeg = (() => { try { execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); return true; } catch { return false; } })();
 
 /** A folder with two short videos (a numbered test picture, `seconds` long at 10 fps) and a sound. */

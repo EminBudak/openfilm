@@ -93,6 +93,8 @@ type Props = {
   onError?(message: string | null): void;
   /** How playing went, about once a second while it plays. */
   onPlayed?(report: PlayedReport): void;
+  /** The clips as placed, again: a page opened for the first time said its own length and size (the rest is as it was). */
+  onSpans?(spans: ClipSpan[]): void;
   children?: ReactNode;
 };
 
@@ -101,7 +103,7 @@ const CLOCK_PINGS = 5;
 /** How long the viewer keeps another size before the film is loaded again for it (ms): not at each step of a drag. */
 const RESCALE_MS = 600;
 
-export const Preview = forwardRef<PreviewHandle, Props>(function Preview({ folder, stage, time, fps, onInfo, onKey, onError, onPlayed, children }, ref) {
+export const Preview = forwardRef<PreviewHandle, Props>(function Preview({ folder, stage, time, fps, onInfo, onKey, onError, onPlayed, onSpans, children }, ref) {
   const t = useT();
   const origin = new URL(folder).origin;
   const [frames, setFrames] = useState<Frame[]>([{ key: 1, ready: false }]);
@@ -138,6 +140,8 @@ export const Preview = forwardRef<PreviewHandle, Props>(function Preview({ folde
   onErrorRef.current = onError;
   const onPlayedRef = useRef(onPlayed);
   onPlayedRef.current = onPlayed;
+  const onSpansRef = useRef(onSpans);
+  onSpansRef.current = onSpans;
   /* the stretches rendered to play in the film's place: told to each load of the film once it is up */
   const rendered = useRef<PreviewRender[]>([]);
   useEffect(() => { onErrorRef.current?.(failed); }, [failed]);
@@ -311,6 +315,8 @@ export const Preview = forwardRef<PreviewHandle, Props>(function Preview({ folde
       } else if (m.type === 'updated') {
         if (m.inPlace) onInfo(m as FilmInfo);
         else reload();
+      } else if (m.type === 'spans') {
+        if (key === shownRef.current?.key && Array.isArray(m.spans)) onSpansRef.current?.(m.spans);
       } else if (m.type === 'picked') {
         const resolve = picks.current.get(m.seq);
         picks.current.delete(m.seq);

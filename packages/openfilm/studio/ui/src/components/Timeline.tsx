@@ -156,7 +156,6 @@ import { BlockThumbs } from './BlockThumbs';
 import { BlockWaveform } from './BlockWaveform';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 import type { PlaybackClock } from './LiveTime';
-import type { PreviewBarRange } from '@/editor/use-preview-renders';
 import { CaptionsIcon } from './player-controls/controls-bar';
 import { isTypingTarget } from './typing-target';
 import { Popover } from './Popover';
@@ -599,8 +598,6 @@ export interface TimelineProps {
   /** The playback clock. With it, playing does not re-render the timeline: the playhead and follow-scroll read it. */
   clock?: PlaybackClock | null;
   playing: boolean;
-  /** Stretches that play late in the viewer, and their renders (editor/use-preview-renders): a line under the ruler. */
-  previewBar?: readonly PreviewBarRange[];
   /** While dragging the playhead: move the picture, do not settle. */
   onScrubPreview: (ms: number) => void;
   /** On release, once: settle. */
@@ -954,7 +951,6 @@ export const Timeline = React.memo(function Timeline({
   timeMs,
   clock,
   playing,
-  previewBar,
   onScrubPreview,
   onScrubCommit,
   onHoverPreview,
@@ -4115,7 +4111,6 @@ export const Timeline = React.memo(function Timeline({
               style={{ width: trackPx, cursor: onReferRuler ? (rulerHoverMs == null && !referDraft ? 'col-resize' : 'crosshair') : 'col-resize' }}
             >
               {tickMarks}
-              {previewBar?.length ? <PreviewBar ranges={previewBar} pxPerMs={pxPerMs} /> : null}
               {onReferRuler ? <RulerRefer hoverMs={rulerHoverMs} draft={referDraft} pxPerMs={pxPerMs} widthPx={trackPx} /> : null}
             </div>
           </div>
@@ -4699,33 +4694,6 @@ function holdAt(el: HTMLElement): Animation {
   const a = el.animate([{ transform: `translate3d(${-HELD_FROM}px,0,0)` }, { transform: `translate3d(${HELD_SPAN - HELD_FROM}px,0,0)` }], { duration: HELD_SPAN, fill: 'both' });
   a.pause();
   return a;
-}
-
-/** The line under the ruler's colors: plays late, rendering, rendered, could not be rendered. */
-const PREVIEW_BAR: Record<PreviewBarRange['state'], string> = { late: '#e5484d', making: '#e8c547', ready: '#3dd68c', failed: '#8b8d98' };
-
-/**
- * Under the ruler, where the viewer plays late, and its renders: red plays late (rendered once the film stops), yellow
- * is rendering, green plays from its render. Each says so when pointed at; a press goes on to the ruler.
- */
-function PreviewBar({ ranges, pxPerMs }: { ranges: readonly PreviewBarRange[]; pxPerMs: number }) {
-  const t = useT();
-  const title = (r: PreviewBarRange) => (r.state === 'late' ? t('timeline.previewLate')
-    : r.state === 'making' ? t('timeline.previewMaking').replace('{p}', String(Math.round((r.ratio ?? 0) * 100)))
-      : r.state === 'ready' ? t('timeline.previewReady') : t('timeline.previewFailed'));
-  return (
-    <>
-      {ranges.map((r) => (
-        <div
-          key={`${r.a}-${r.b}`}
-          data-preview-bar={r.state}
-          title={title(r)}
-          className="absolute bottom-0"
-          style={{ left: r.a * 1000 * pxPerMs, width: Math.max(2, (r.b - r.a) * 1000 * pxPerMs), height: 3, background: PREVIEW_BAR[r.state], opacity: 0.9 }}
-        />
-      ))}
-    </>
-  );
 }
 
 /**

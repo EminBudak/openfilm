@@ -665,6 +665,15 @@ function wakePage(c) {
     c.drawn = false;
     /* its own size, when it says one (else its clip's size, or the stage's: see settle) */
     if (c.child.width > 0 && c.child.height > 0) c.own = { w: c.child.width, h: c.child.height };
+    /* opened for the first time after the film was up (see load): its own length and size, which the film had not
+       waited for, placed by now (it shows only once drawn) and told to the editor */
+    if (c.unread) {
+      c.unread = false;
+      const length = c.child.duration;
+      c.native = Number.isFinite(length) && length > 0 ? length : undefined;
+      if (c.own && (c.own.w !== c.nw || c.own.h !== c.nh)) { c.nw = c.own.w; c.nh = c.own.h; place(c, c.row.box); }
+      window.__filmEditor.learned?.();
+    }
     window.__filmEditor.stage.woke?.();
   });
   pagesAwake.add(c);
@@ -844,6 +853,11 @@ async function load(row, track, ti, el) {
     /* a page that is not there: its clip keeps its time, at the stage's size */
     c.missing = true;
     c.nw = stage.w; c.nh = stage.h;
+  } else if (SKIP_MISSING && row.time?.length === 2) {
+    /* an editor's preview: a page whose #t= is its length opens when the playhead comes near (see near), its own
+       length and size learned then (see wakePage); the film is up without waiting for every page of a long film */
+    c.row = row;
+    c.unread = true;
   } else {
     /* opened to read its length (the host serves it unopened, see holdPages; filmStart gives it the stage's size) */
     c.row = row;
@@ -1215,6 +1229,8 @@ window.__filmEditor = {
     updated: null,
     woke: null,
   },
+  /** Set by a host (Studio's bridge) to hear of a page's own length and size learned as it first opens (see load). */
+  learned: null,
   /**
    * The film after an edit (`look`: its file's filmHead, when the edit came from the file; another one than this film
    * was loaded with needs the page loaded again): changed in place (see change), resolving to true, or to false when
