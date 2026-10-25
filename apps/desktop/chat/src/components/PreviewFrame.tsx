@@ -7,6 +7,7 @@ import { X } from 'lucide-react';
 import { Tooltip } from './Tooltip';
 import { useT } from '@/i18n';
 import { chatLayer } from '@/lib/chat-layer';
+import { previewTop } from '@/lib/preview-top';
 
 /** A button in the top bar. The lightbox is black, so these use shades of white rather than the UI tokens. */
 export const PREVIEW_BTN =
@@ -102,7 +103,7 @@ export function PreviewFrame({
 
   return createPortal(
     <div className="fixed inset-0 z-[10100] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm sm:p-8"
-      style={{ paddingTop: 'max(1rem, var(--inset-titlebar-h, 0px))', WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+      style={{ paddingTop: previewTop(navigator.platform), WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       onClick={onClose}>
       <div ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-label={name}
         className="relative isolate flex h-[min(900px,92dvh)] min-h-0 w-full max-w-[1480px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#181818] shadow-2xl outline-none"
