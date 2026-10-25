@@ -373,6 +373,16 @@ test("Cursor's agent counts only in its own folder (or Homebrew's cursor-cli), w
   assert.equal(detectAgentInstallation('cursor', { home, env: { PATH: '' }, pathDirs: [join(home, 'bin'), links], applicationDirs: [] }).cli, join(links, 'cursor-agent'));
 });
 
+test("DeepSeek Harness's Windows shim runs a script inside its app's archive on the app itself: the shim, never what it names (#190)", () => {
+  const app = mkdtempSync(join(tmpdir(), 'of-dsh-'));
+  put(join(app, 'DeepSeek Harness.exe'));
+  put(join(app, 'resources', 'app.asar', 'dsh', 'node_modules', '@deepseek-ai', 'dsh-desktop-host', 'lib', 'cli.js'));
+  const bin = join(app, 'resources', 'runtime', 'cli', 'bin');
+  const shim = put(join(bin, 'dsh.cmd'), '@echo off\r\nsetlocal DisableDelayedExpansion\r\nset "ELECTRON_RUN_AS_NODE=1"\r\n"%~dp0..\\..\\..\\..\\DeepSeek Harness.exe" --expose-internals "%~dp0..\\..\\..\\app.asar\\dsh\\node_modules\\@deepseek-ai\\dsh-desktop-host\\lib\\cli.js" %*\r\nexit /b %errorlevel%\r\n');
+  assert.equal(cmdTarget(shim), null);
+  assert.equal(findExecutable('dsh', [], { PATH: bin }, { win: true }), shim);
+});
+
 test("Cursor's agent on Windows: found in %LOCALAPPDATA%\\cursor-agent, started by its own shim, which runs its own Node", () => {
   if (process.platform === 'win32') return;
   const home = mkdtempSync(join(tmpdir(), 'of-home-'));
