@@ -47,7 +47,7 @@ import { clipThumbId, overridesToken } from '@/lib/thumb-frame';
 import { useLoadedThumbs } from '@/lib/use-loaded-thumbs';
 import { droppedOverrides, overrideTarget, undoneFields, type DroppedEdits, type PersonEdit } from '@/lib/dropped-overrides';
 import { filmFrameBox, type FilmFrameId } from '@/lib/film-frame';
-import { canvasFor, fitToCanvas } from '@/lib/canvas-fit';
+import { canvasFor, firstPictureSize, fitToCanvas } from '@/lib/canvas-fit';
 import { factsOfProbe, mediaListingOf, resourceKindOf, srcHitsAsset, warmProjectMedia, type MediaListing, type MediaProxy, type MediaResult, type MediaSources, type WorkspaceResource } from '@/lib/workspace-resources';
 import { BrandLoadingScreen } from './BrandLoadingScreen';
 import { BrandLogo } from './BrandLogo';
@@ -2244,14 +2244,8 @@ export function ProjectView({ projectId, onProject, onLeave }: {
      keeps the canvas's short side (canvasFor; a typed size is that size), and every picture on it is scaled by one
      factor into the new canvas, centered, in the same edit (one undo). Laying the film out again for the new canvas
      is the agent's (the inspector gives the words) */
-  /* "Fit (original)": the shape of the film's first picture (the earliest on the film whose size the preview knows) */
-  const originalSize = React.useMemo(() => {
-    const sized = new Map(spans.filter((span) => span.w && span.h).map((span) => [span.id, { w: span.w!, h: span.h! }]));
-    const first = (film.film?.tracks ?? []).flatMap((track) => track.clips)
-      .filter((clip) => !clip.sound && filmSrcKind(clip.src) !== 'sound' && sized.has(clip.id))
-      .sort((a, b) => (a.at ?? 0) - (b.at ?? 0))[0];
-    return first ? sized.get(first.id) ?? null : null;
-  }, [spans, film.film]);
+  /* "Fit (original)": the shape of the film's first picture (canvas-fit's firstPictureSize) */
+  const originalSize = React.useMemo(() => firstPictureSize((film.film?.tracks ?? []).flatMap((track) => track.clips), spans), [spans, film.film]);
   /** The edit that makes the canvas `size`, the film fitted into it (see canvas-fit). */
   const canvasOps = React.useCallback((size: { w: number; h: number }): Op[] => {
     const own = new Map(spans.map((span) => [span.id, span.w && span.h ? { w: span.w, h: span.h } : null]));
