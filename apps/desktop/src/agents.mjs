@@ -535,7 +535,7 @@ export async function agentSignInMethods(id) {
   const cli = resolveAgentCli(id, { pathDirs: shell.PATH.split(PATH_SEP) });
   if (!cli) return [];
   const launch = adapterLaunch(id, cli.path);
-  const child = spawn(launch.cmd, launch.args, { env: childEnvironment({ shell, extra: launch.env }), stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
+  const child = spawn(launch.cmd, launch.args, { ...OWN_GROUP, env: childEnvironment({ shell, extra: launch.env }), stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
   child.once('error', () => {});
   try {
     const conn = acp.client({ name: 'openfilm-desktop' }).connect(acp.ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout)));
@@ -550,7 +550,7 @@ export async function agentSignInMethods(id) {
   } catch {
     return [];
   } finally {
-    child.kill();
+    stopTree(child);
   }
 }
 
