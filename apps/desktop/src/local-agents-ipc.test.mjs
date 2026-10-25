@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readLog } from './chat-store.mjs';
-import { agentProblem, registerLocalAgentIpc, sentError } from './local-agents-ipc.mjs';
+import { agentProblem, registerLocalAgentIpc, sentError, turnModel } from './local-agents-ipc.mjs';
 
 test("a start that fails is written in the log of the turn it was for, with why", async () => {
   const handlers = new Map();
@@ -44,4 +44,24 @@ test('the error as the agent sent it, under any rewording on the way; none when 
   const reworded = new Error('Codex stopped while answering without saying why.', { cause: new Error('stream closed', { cause: sent }) });
   assert.deepEqual(sentError(reworded), { code: -32603, message: 'Internal error', data: { details: 'stream closed' } });
   assert.equal(sentError(new Error('not installed')), null);
+});
+
+test("a Copilot turn's model, read once its usage record has reached the file; another agent's turn doesn't wait", async () => {
+  const home = mkdtempSync(join(tmpdir(), 'openfilm-copilot-'));
+  mkdirSync(join(home, 'session-state', 'cop-24680'), { recursive: true });
+  const file = join(home, 'session-state', 'cop-24680', 'events.jsonl');
+  const from = Date.now();
+  const at = (ms) => new Date(from + ms).toISOString();
+  writeFileSync(file, `${JSON.stringify({ type: 'user.message', data: { content: 'Make a title' }, timestamp: at(0) })}
+`);
+  /* a one-request turn: Copilot writes the request's usage record a moment after the prompt has answered */
+  const usage = { type: 'session.usage_record', timestamp: at(50), data: { usage: { model: 'gpt-6-luna', modelDisplayName: 'GPT-6 Luna', apiCallId: 'a1' } } };
+  setTimeout(() => appendFileSync(file, `${JSON.stringify(usage)}
+`), 200);
+  const env = { COPILOT_HOME: home };
+  assert.equal(await turnModel({ agent: 'copilot', sessionId: 'cop-24680', from, env }), 'GPT-6 Luna');
+
+  const started = Date.now();
+  assert.equal(await turnModel({ agent: 'claude', sessionId: 'cop-24680', from, env }), null);
+  assert.ok(Date.now() - started < 100, 'not waited for');
 });

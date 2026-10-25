@@ -14,7 +14,8 @@
  *   desktop:local-agents:prompt      { key, text, meta?, images? } → { ok, stopReason } | { ok: false, error }
  *                                    images: [{ data (base64), mimeType }], the pictures of the message's references,
  *                                    sent after the text to an agent that takes pictures (the text names their files
- *                                    either way)
+ *                                    either way); `model` beside the stopReason: the model that answered, for an
+ *                                    agent whose session names none (Copilot's, from its record)
  *   desktop:local-agents:steer       { key, text, images? } → { ok, outcome }   a message sent while a turn runs,
  *                                    into that turn (ok: it joined it); the page sends it as a turn of its own if not
  *   desktop:local-agents:adopt       { key, turnId | null, meta? }   what the agent does with nobody having written (a
@@ -48,7 +49,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { recordProblem, problemsFile } from 'openfilm/problems';
 import { LOG_SETTLE_MS } from './agent-logs.mjs';
-import { RECORDED_AGENTS, agentRecordCalls, compactCalls } from './agent-records.mjs';
+import { RECORDED_AGENTS, agentRecordCalls, compactCalls, recordedModel } from './agent-records.mjs';
 import { skillStore } from './agent-skills.mjs';
 import { AGENTS, AgentSession, HARNESS_AGENTS, isAgentId, isChatAgent, listAgents, openAgentSignIn, probeFolder } from './agents.mjs';
 import { loggedBlocks, logsDir, openLog, writeModelLog } from './chat-store.mjs';
@@ -85,6 +86,21 @@ export async function keepAgentRecord({ agent, sessionId, cwd, turnId, from, to,
     if (found?.calls.length) writeModelLog(cwd, turnId, compactCalls(found.calls));
   } catch (e) {
     log(`agent record ${turnId}: ${e instanceof Error ? e.message : String(e)}\n`);
+  }
+}
+
+/**
+ * The model that answered a Copilot turn from `from` (ms), as its own record names it, for a session that names none:
+ * read once its last usage record has had time to reach the file, as keepAgentRecord waits. Null for any other agent
+ * (at once, without waiting), or when none is found.
+ */
+export async function turnModel({ agent, sessionId, from, env = null, settleMs = RECORD_SETTLE_MS }) {
+  if (agent !== 'copilot' || !sessionId) return null;
+  try {
+    await new Promise((done) => setTimeout(done, settleMs));
+    return recordedModel({ agent, sessionId, from, env: env ?? await loginShellVariables({ staleOk: true }) });
+  } catch {
+    return null;
   }
 }
 
@@ -331,6 +347,12 @@ export function registerLocalAgentIpc(ipcMain, { trusted, binDir = null, fallbac
       activePrompts--;
       entry.running -= 1;
       onWorking(working());
+    }
+    /* GitHub Copilot, its session naming no model (on some accounts): the one that answered, as its own record says,
+       for the turn's footer */
+    if (result.ok && entry.agent === 'copilot' && !entry.info?.configOptions?.some((o) => o?.category === 'model')) {
+      const model = await turnModel({ agent: entry.agent, sessionId: entry.info?.sessionId, from });
+      if (model) result = { ...result, model };
     }
     entry.lastUsed = Date.now();
     if (turn) {
