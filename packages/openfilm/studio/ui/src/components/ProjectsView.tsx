@@ -908,8 +908,26 @@ function FolderFace({ posters, small = false }: { posters: FolderItemProps['post
 }
 
 /**
- * A folder card: the project card's frame (a 16:9 face and a name under it), its face the covers of its newest
- * projects, so what it holds shows at a glance; an empty one shows the folder picture. Double-click the name to rename.
+ * A folder's 16:9 box drawn as a folder, so it doesn't read as a project: the back's tab (`--folder-back`, as in the
+ * folder picture) at the top left, and the front under it, which holds the face and anything over it (`children`).
+ * The card's, and the list row's thumbnail (`small`).
+ */
+function FolderFrame({ small = false, children }: { small?: boolean; children: React.ReactNode }) {
+  return (
+    <>
+      <span aria-hidden className={`absolute left-0 top-0 h-1/2 w-[38%] bg-[var(--folder-back)] ${small ? 'rounded-[5px]' : 'rounded-lg'}`} />
+      <span
+        className={`absolute inset-x-0 bottom-0 overflow-hidden bg-[var(--surface-2)] ring-1 ring-[var(--border)] transition duration-200 group-hover/frame:bg-[var(--surface-3)] group-hover/frame:ring-[var(--border-strong)] ${small ? 'top-[9%] rounded-md' : 'top-[7%] rounded-lg'}`}
+      >
+        {children}
+      </span>
+    </>
+  );
+}
+
+/**
+ * A folder card: the project card's size (a 16:9 box and a name under it), drawn as a folder (FolderFrame), its face
+ * the covers of its newest projects, so what it holds shows at a glance; an empty one shows the folder picture.
  */
 function FolderCard({
   folder,
@@ -931,19 +949,21 @@ function FolderCard({
         type="button"
         onClick={onOpen}
         aria-label={folder.name}
-        className="relative block aspect-video w-full overflow-hidden rounded-lg bg-[var(--surface-2)] text-left ring-1 ring-[var(--border)] transition duration-200 hover:bg-[var(--surface-3)] hover:ring-[var(--border-strong)]"
+        className="group/frame relative block aspect-video w-full text-left"
       >
-        <FolderFace posters={posters} />
-        {/* the count: dark glass over covers; on the plain face a dark patch is too heavy, so the face's own style */}
-        <span
-          className={`absolute bottom-2 right-2 rounded-full px-1.5 py-0.5 text-[10.5px] font-medium tabular-nums ${
-            posters.length > 0
-              ? 'bg-black/45 text-white/90 backdrop-blur-sm'
-              : 'border border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)]'
-          }`}
-        >
-          {count}
-        </span>
+        <FolderFrame>
+          <FolderFace posters={posters} />
+          {/* the count: dark glass over covers; on the plain face a dark patch is too heavy, so the face's own style */}
+          <span
+            className={`absolute bottom-2 right-2 rounded-full px-1.5 py-0.5 text-[10.5px] font-medium tabular-nums ${
+              posters.length > 0
+                ? 'bg-black/45 text-white/90 backdrop-blur-sm'
+                : 'border border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)]'
+            }`}
+          >
+            {count}
+          </span>
+        </FolderFrame>
       </button>
       {/* the same two lines as a project card (name, then a dated line); no folder icon before the name: the face says
           it is a folder already, and an icon would put this name out of line with the projects'. A click on the name
@@ -1023,10 +1043,12 @@ function FolderListRow({
       <button
         type="button"
         onClick={onOpen}
-        className="group relative block aspect-video w-28 shrink-0 overflow-hidden rounded-md bg-[var(--surface-2)] ring-1 ring-[var(--border)] transition hover:bg-[var(--surface-3)] sm:w-36"
+        className="group/frame relative block aspect-video w-28 shrink-0 sm:w-36"
         aria-label={folder.name}
       >
-        <FolderFace posters={posters} small />
+        <FolderFrame small>
+          <FolderFace posters={posters} small />
+        </FolderFrame>
       </button>
       <div className="min-w-0 flex-1">
         {renaming ? (
