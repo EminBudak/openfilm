@@ -599,6 +599,43 @@ test('a film of many pages keeps only a few open: one far from the playhead is c
   }
 });
 
+test('a page Windows had no network buffer for (net::ERR_NO_BUFFER_SPACE) is loaded again; another failure is not', { timeout: 60_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'of-no-buffer-'));
+  writeFileSync(join(dir, 'p.html'), page('hello', 1));
+  const site = await serve(dir);
+  const browser = await launch();
+  /** The browser, its pages' first `n` loads failing with `why` as Chromium says it. */
+  const failing = (/** @type {number} */ n, /** @type {string} */ why) => {
+    const loads = { count: 0 };
+    return { loads, browser: /** @type {any} */ ({ newContext: async (/** @type {any} */ o) => {
+      const context = await browser.newContext(o);
+      const newPage = context.newPage.bind(context);
+      context.newPage = async () => {
+        const p = await newPage();
+        const goto = p.goto.bind(p);
+        p.goto = async (url, opts) => (++loads.count <= n ? Promise.reject(new Error(`page.goto: ${why} at ${url}`)) : goto(url, opts));
+        return p;
+      };
+      return context;
+    } }) };
+  };
+  try {
+    let f = failing(2, 'net::ERR_NO_BUFFER_SPACE');
+    const film = await FilmPage.open(f.browser, site.url, 'p.html');
+    assert.equal(film.meta.duration, 1);
+    assert.equal(f.loads.count, 3);
+    await film.close();
+    f = failing(3, 'net::ERR_NO_BUFFER_SPACE');
+    await assert.rejects(FilmPage.open(f.browser, site.url, 'p.html'), /ERR_NO_BUFFER_SPACE/);
+    f = failing(1, 'net::ERR_CONNECTION_REFUSED');
+    await assert.rejects(FilmPage.open(f.browser, site.url, 'p.html'), /ERR_CONNECTION_REFUSED/);
+    assert.equal(f.loads.count, 1);
+  } finally {
+    await browser.close();
+    await site.close();
+  }
+});
+
 test('a host waits for a film as long as it keeps loading; a page that never gets further fails in time', { timeout: 60_000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'of-progress-'));
   /* five pages ready one after another, 0.5 s apart: 2.5 s in all, longer than the host waits without news */

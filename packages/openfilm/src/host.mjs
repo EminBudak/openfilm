@@ -333,6 +333,9 @@ export async function closeBrowsers() {
  */
 const READY_MS = 60_000;
 
+/** How many times a page is loaded when the system has no network buffer for it (FilmPage.open). */
+const OPEN_TRIES = 3;
+
 /** How long a frame's picture may take once it is drawn. */
 const CAPTURE_MS = 30_000;
 
@@ -426,8 +429,17 @@ export class FilmPage {
         }
       });
     }
-    /* a page that never loads is closed: its tab would go on running */
-    await film.page.goto(new URL(entry, origin + '/').href, { waitUntil: 'load', timeout: 60_000 }).catch(async (e) => { await film.context.close(); throw e; });
+    /* a page that never loads is closed: its tab would go on running. Windows sometimes has no socket buffer free for
+       a moment (net::ERR_NO_BUFFER_SPACE, seen with many browsers or servers at once): that page is loaded again */
+    for (let tries = 1; ; tries++) {
+      const missed = await film.page.goto(new URL(entry, origin + '/').href, { waitUntil: 'load', timeout: 60_000 }).then(() => null, (e) => e);
+      if (!missed) break;
+      if (tries === OPEN_TRIES || !/net::ERR_NO_BUFFER_SPACE/.test(String(missed?.message))) {
+        await film.context.close();
+        throw missed;
+      }
+      await new Promise((r) => setTimeout(r, 500 * tries));
+    }
     /* what else the page said, once (not what `said` already says), and failed files by their path in the folder */
     const failed = (said = '') => {
       const req = [...new Set(problems.filter((p) => p.kind === 'request').map((p) => p.message.replace(`${origin}/`, '')))]
