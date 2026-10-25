@@ -444,6 +444,21 @@ test('a failure keeps what the agent said; one that says nothing says where it s
   assert.equal(ended.message, 'Rate limit reached. Its process ended.');
 });
 
+test('a process that ends without a word names the command it ran, not the network', () => {
+  const command = ['C:\\Programs\\DeepSeek Harness\\resources\\app.asar\\dsh\\lib\\cli.js', '--profile', 'acp'];
+  const silent = explainFailure(new Error('ACP connection closed'), { label: 'DeepSeek Harness', step: 'initialize', exited: { code: 0 }, command });
+  assert.equal(silent.message, 'DeepSeek Harness stopped as it started without saying why. '
+    + 'Its process ("C:\\Programs\\DeepSeek Harness\\resources\\app.asar\\dsh\\lib\\cli.js" --profile acp) ended with code 0.');
+  assert.doesNotMatch(silent.message, /network/);
+
+  const wrote = explainFailure(new Error('ACP connection closed'), { label: 'Kimi', step: 'initialize', exited: { code: 1 }, stderr: 'Error: bad config', command: ['/usr/local/bin/kimi', 'acp'] });
+  assert.equal(wrote.message, 'Kimi stopped as it started without saying why. Its process (/usr/local/bin/kimi acp) ended with code 1. It last wrote: Error: bad config');
+
+  const running = explainFailure(new Error('Internal error'), { label: 'Kimi', step: 'session/prompt', command: ['/usr/local/bin/kimi', 'acp'] });
+  assert.match(running.message, /check the network or proxy/, 'a process still running may be waiting on its service');
+  assert.doesNotMatch(running.message, /kimi acp/);
+});
+
 test('"Internal error" with its reason in data: the reason is what the turn says, and the error as sent stays under it', () => {
   const sent = Object.assign(new Error('Internal error'), { code: -32603, data: { details: 'Request timed out.' } });
   const said = explainFailure(signInError('Codex', sent, { own: true }), { label: 'Codex', step: 'session/prompt' });

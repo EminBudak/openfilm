@@ -900,22 +900,27 @@ export function stderrReason(stderr = '') {
   return [...new Set((reasons.length ? reasons : lines).slice(-3))].join(' | ').slice(-600);
 }
 
+/* one word of a command as the chat shows it: quoted when it has a space */
+const shownArg = (/** @type {string} */ a) => (a && !/[\s"]/.test(a) ? a : `"${a}"`);
+
 /**
- * An agent's failure as it is: what it said when it said why; else the step it stopped at, how its process ended and
- * the last it wrote to stderr; with neither, that an agent which cannot reach its service stops like this.
- * @param {any} e @param {{ label: string, step?: string | null, stderr?: string, exited?: { code: number | null } | null }} at
+ * An agent's failure as it is: what it said when it said why; else the step it stopped at, how its process ended (the
+ * command it ran and its code) and the last it wrote to stderr; with neither, while its process still runs, that an
+ * agent which cannot reach its service stops like this. A process that ended is not the network.
+ * @param {any} e @param {{ label: string, step?: string | null, stderr?: string, exited?: { code: number | null } | null, command?: string[] | null }} at
  */
-export function explainFailure(e, { label, step = null, stderr = '', exited = null }) {
+export function explainFailure(e, { label, step = null, stderr = '', exited = null, command = null }) {
   const said = (e instanceof Error ? e.message : String(e ?? '')).trim();
   const bare = !said || SAYS_NOTHING.test(said);
   if (!bare && !exited) return e;
   const tail = stderrReason(stderr);
   const where = step && STEP_WORDS[step] ? ` ${STEP_WORDS[step]}` : '';
-  const ended = exited ? ` Its process ended${exited.code == null ? '' : ` with code ${exited.code}`}.` : '';
+  const ran = command?.length ? ` (${command.map(shownArg).join(' ')})` : '';
+  const ended = exited ? ` Its process${ran} ended${exited.code == null ? '' : ` with code ${exited.code}`}.` : '';
   const message = [
     bare ? `${label} stopped${where} without saying why.` : said,
     ended.trim(),
-    tail ? `It last wrote: ${tail}` : bare ? 'If it cannot reach its service, check the network or proxy, then try again.' : '',
+    tail ? `It last wrote: ${tail}` : bare && !exited ? 'If it cannot reach its service, check the network or proxy, then try again.' : '',
   ].filter(Boolean).join(' ');
   return Object.assign(new Error(message, { cause: e }), { ...(e?.code !== undefined ? { code: e.code } : {}), ...(step ? { step } : {}) });
 }
@@ -1040,7 +1045,7 @@ export class AgentSession {
     if (this.child && !this.exited && this.child.exitCode === null && this.child.signalCode === null) {
       await new Promise((done) => { this.child.once('exit', done); setTimeout(done, 1000).unref?.(); });
     }
-    return explainFailure(e, { label: this.spec.label, step: this.step, stderr: this.stderr, exited: this.exited ?? null });
+    return explainFailure(e, { label: this.spec.label, step: this.step, stderr: this.stderr, exited: this.exited ?? null, command: this.command ?? null });
   }
 
   /**
@@ -1089,6 +1094,8 @@ export class AgentSession {
       ? await logSwitches(this.opts.agent, { base: this.opts.logDir, shell, cwd: this.opts.cwd }).catch(() => null) : null;
     /* an agent that speaks ACP itself: its own program, started as the registry starts it */
     const native = cli && !this.spec.adapter ? starting(cli.path, [...this.spec.args, ...(this.logging?.args ?? []), ...(skills?.args ?? [])]) : null;
+    /* what a failure names: the agent's program and its own words, as the person would run it (not our logging or skills) */
+    this.command = native ? [cli.path, ...this.spec.args] : null;
     const extra = { ...agentDefaults(this.opts.agent, shell), ...this.opts.env, ...(native ? native.env : node.env), ...(cli && this.spec.env ? this.spec.env(cli.path) : {}), ...own, ...skills?.env, ...this.logging?.env };
     /* OpenCode's inline configuration carries both its skills and, in Developer mode, its logging */
     if (skills?.env?.OPENCODE_CONFIG_CONTENT && this.logging?.env?.OPENCODE_CONFIG_CONTENT) {
