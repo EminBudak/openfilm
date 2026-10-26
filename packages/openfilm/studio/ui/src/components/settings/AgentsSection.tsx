@@ -4,8 +4,10 @@
  *
  * Codex, Claude Code and the others are the person's own programs, on the account signed in on the computer:
  * connecting opens their own sign-in only when they are signed out (the app waits for it), disconnecting only stops
- * the app using them, and connecting again uses the account signed in then (switched in the agent itself).
- * Claude Code's and Codex's rows say whose account it is, and Codex's what is left of its plan. Codex and Claude Code
+ * the app using them, and connecting again uses the account signed in then. Switch account signs one out with its own
+ * command and opens its sign-in (the person agrees first); one without such a command says where it switches (its
+ * maker's app, or the agent itself), and Done reconnects it. A row says whose account it is when the agent tells it,
+ * and Codex's what is left of its plan. Codex and Claude Code
  * are always listed under the person's agents, with the person's own key; the others there once switched on (connecting
  * one does), else under "More agents", with where to get them when they are not installed. The person's own key is on a service of theirs, with a model that reads pictures (the agent looks at its own frames).
  *
@@ -23,7 +25,7 @@ import { Check, Copy, Download, KeyRound, Loader2, Plus, X } from 'lucide-react'
 import { useLanguage, useT } from '@/i18n';
 import { BYOK_EFFORTS, studioHost, type HostAgent, type HostAgentDiagnosis, type HostAgentId, type HostAgentUsage, type HostByokEffort, type HostByokEffortLevel, type HostByokFormat, type HostOwnModel } from '@/lib/host';
 import { parseContextLength } from '@/lib/context-length';
-import { accountOrg, missingActions, ownModelError } from '@/lib/agent-row';
+import { accountOrg, missingActions, ownModelError, switchOffer } from '@/lib/agent-row';
 
 /** What is left of the plan: what Codex can say (the app's agent-usage.mjs; Claude Code's own report is wrong for Team accounts). */
 const PLAN_AGENTS: readonly HostAgentId[] = ['codex'];
@@ -119,7 +121,10 @@ export function AgentsSection() {
   const [diagnosis, setDiagnosis] = React.useState<{ id: HostAgentId; report: HostAgentDiagnosis | null; copied?: boolean } | null>(null);
   /* the agent whose installer the person is asked about */
   const [confirming, setConfirming] = React.useState<HostAgentId | null>(null);
+  /* the agent whose account the person is switching: asked first, or told where it switches */
+  const [switching, setSwitching] = React.useState<HostAgentId | null>(null);
   if (!host) return null;
+  const offerSwitch = (agent: HostAgent) => switchOffer(agent, { switchAccount: Boolean(host.switchAccount) });
 
   const act = (id: HostAgentId, run: () => Promise<{ ok?: boolean; error?: string } | unknown>) => {
     setBusy(id);
@@ -199,10 +204,17 @@ export function AgentsSection() {
     const working = busy === agent.id;
     if (agent.status === 'ready' && chosen) {
       return (
-        <SettingsButton variant="quiet" disabled={working} title={agent.id === 'byok' ? undefined : t('settings.agents.disconnectHint').replaceAll('{name}', agent.name)}
-          onClick={() => act(agent.id, () => host.disconnect(agent.id))}>
-          {t('settings.agents.disconnect')}
-        </SettingsButton>
+        <>
+          {offerSwitch(agent) ? (
+            <SettingsButton variant="quiet" disabled={working || switching === agent.id} onClick={() => setSwitching(agent.id)}>
+              {t('settings.agents.switchAccount')}
+            </SettingsButton>
+          ) : null}
+          <SettingsButton variant="quiet" disabled={working} title={agent.id === 'byok' ? undefined : t('settings.agents.disconnectHint').replaceAll('{name}', agent.name)}
+            onClick={() => act(agent.id, () => host.disconnect(agent.id))}>
+            {t('settings.agents.disconnect')}
+          </SettingsButton>
+        </>
       );
     }
     if (agent.status === 'missing') {
@@ -265,6 +277,10 @@ export function AgentsSection() {
     const meter = chosen && agent.status === 'ready' && PLAN_AGENTS.includes(agent.id) && Boolean(host.usage) && (plan === undefined || Boolean(plan?.windows.length));
     const hint = diag?.report ? hintOf(diag.report) : null;
     const asking = confirming === agent.id && agent.status === 'missing' && agent.installer && host.install ? agent.installer : null;
+    /* Switch account: here, once the person agrees to the sign-out; elsewhere, where (in its maker's app or itself) */
+    const switchHow = chosen && switching === agent.id ? offerSwitch(agent) : null;
+    const whereKey = `settings.agents.switchWhere.${agent.id}`;
+    const where = t(whereKey) === whereKey ? agent.name : t(whereKey);
     return (
       <SettingsItem
         key={agent.id}
@@ -292,7 +308,7 @@ export function AgentsSection() {
           </>
         )}
       >
-        {agent.status === 'waiting' || open || said || agent.chosen || lost || meter || asking || (chosen && agent.status === 'ready' && (host.mcp || host.skills)) ? (
+        {agent.status === 'waiting' || open || said || agent.chosen || lost || meter || asking || switchHow || (chosen && agent.status === 'ready' && (host.mcp || host.skills)) ? (
           <div className="flex flex-col gap-1.5 pl-[34px]">
             {meter ? (
               <div className="flex flex-col gap-1.5" aria-label={t('settings.agents.usage')}>
@@ -318,6 +334,24 @@ export function AgentsSection() {
                 <div className="flex justify-end gap-1.5">
                   <SettingsButton variant="quiet" onClick={() => setConfirming(null)}>{t('settings.agents.cancel')}</SettingsButton>
                   <SettingsButton variant="primary" onClick={() => { setConfirming(null); act(agent.id, () => host.install!(agent.id)); }}>{t('settings.agents.installRun')}</SettingsButton>
+                </div>
+              </SettingsInset>
+            ) : null}
+            {switchHow ? (
+              <SettingsInset>
+                <p className="text-[14px] leading-relaxed text-[var(--text)]">
+                  {switchHow === 'here'
+                    ? t('settings.agents.switchConfirm').replaceAll('{name}', agent.name)
+                    : t('settings.agents.switchElsewhere').replaceAll('{name}', agent.name).replace('{where}', where)}
+                </p>
+                <div className="flex justify-end gap-1.5">
+                  <SettingsButton variant="quiet" onClick={() => setSwitching(null)}>{t('settings.agents.cancel')}</SettingsButton>
+                  <SettingsButton variant="primary" onClick={() => {
+                    setSwitching(null);
+                    act(agent.id, () => (switchHow === 'here' ? host.switchAccount!(agent.id) : host.connect(agent.id)));
+                  }}>
+                    {switchHow === 'here' ? t('settings.agents.switchRun') : t('settings.agents.switchDone')}
+                  </SettingsButton>
                 </div>
               </SettingsInset>
             ) : null}

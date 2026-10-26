@@ -24,6 +24,8 @@ export interface RosterAgent {
   install?: string | null;
   setupRequired?: string | null;
   error?: string;
+  /** Whose sign-in it uses, when the agent tells (no key or token). */
+  account?: { method: string; email?: string; org?: string; plan?: string };
   /**
    * The own key's models, each set up on its own (its name, its service, the model asked for there), with the reasoning
    * efforts it offers and the one it starts on (apps/desktop src/pi-config.mjs EFFORTS); the first one to begin with.

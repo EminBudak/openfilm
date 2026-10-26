@@ -16,8 +16,10 @@
  *     else hold or pass on their credentials. The app runs their own program, sign-in is its own (`claude auth login`
  *     in Terminal, or a command window on Windows; Codex in Codex itself), and the app never sees a token.
  *
- * Each uses the account signed in on the computer, as it is: one switched in the agent (or its maker's app) is the
- * one used once the agent is connected again here.
+ * Each uses the account its own program is signed in to, which is not always its maker's app's: Claude Code keeps its
+ * own sign-in (`claude auth`), apart from the Claude app's, even the copy inside that app. One with a sign-out command
+ * (`logout`) switches account from Settings → Agents (agent-roster.mjs switchAccount); the others in the agent itself,
+ * or its maker's app where they share it (Codex, DeepSeek Harness).
  *
  * The agent works the way it would in a terminal: in the project's folder, with the `openfilm` command on its PATH
  * (this app's copy, so its Studio is the one in the window) and a few lines saying where it is (INSTRUCTIONS).
@@ -48,7 +50,9 @@ const require = createRequire(import.meta.url);
  * person's program itself with `args`. Signed in? `auth` asks the program (its words say); without it, a session is
  * opened and closed (acpSignedIn). `login` is its own sign-in, run in Terminal (none: the program itself, which asks
  * for one on its first run; null: signed in in the program or its maker's app, never from here, so one found is
- * connected). `authenticate`: the ACP auth method that takes up the program's own sign-in.
+ * connected). `logout`: its own sign-out, run here with no window (signOutAgent), so Switch account can sign in to
+ * another account; none for an agent that has no such command, or one that asks which account (OpenCode).
+ * `authenticate`: the ACP auth method that takes up the program's own sign-in.
  * `approve`: it asks permission for what the app lets every agent do (see the chat's AGENT_FORCED_PREFS), so the app
  * answers yes itself. The others are told the app's INSTRUCTIONS in the first message of a session (`systemPrompt`:
  * how Claude Code and Codex are told them instead).
@@ -60,6 +64,7 @@ export const AGENTS = Object.freeze({
     env: (path) => ({ CLAUDE_CODE_EXECUTABLE: path }),
     auth: ['auth', 'status'],
     login: ['auth', 'login'],
+    logout: ['auth', 'logout'],
     /* of the shell only its PATH, proxies, config folder and locale, as 0.1.5 had it: a key or
        gateway set there (ANTHROPIC_*) would take the place of the person's Claude subscription */
     fromShell: shellSubset,
@@ -77,7 +82,7 @@ export const AGENTS = Object.freeze({
     systemPrompt: true,
   },
   copilot: { label: AGENT_DEFINITIONS.copilot.name, args: ['--acp', '--allow-all'], login: ['login'], approve: true },
-  cursor: { label: AGENT_DEFINITIONS.cursor.name, args: ['--force', 'acp'], auth: ['status'], login: ['login'], authenticate: 'cursor_login', approve: true },
+  cursor: { label: AGENT_DEFINITIONS.cursor.name, args: ['--force', 'acp'], auth: ['status'], login: ['login'], logout: ['logout'], authenticate: 'cursor_login', approve: true },
   opencode: { label: AGENT_DEFINITIONS.opencode.name, args: ['acp'], login: ['auth', 'login'], approve: true },
   /* CodeBuddy is the China edition unless the person's shell says otherwise: the program itself defaults to the
      international site (www.codebuddy.ai) whichever site it was signed in on, out of reach from China */
@@ -85,7 +90,7 @@ export const AGENTS = Object.freeze({
     defaults: { CODEBUDDY_INTERNET_ENVIRONMENT: 'internal' } },
   qwen: { label: AGENT_DEFINITIONS.qwen.name, args: ['--acp', '--approval-mode', 'yolo'], login: [], approve: true },
   kimi: { label: AGENT_DEFINITIONS.kimi.name, args: ['acp'], login: ['login'], approve: true },
-  minimax: { label: AGENT_DEFINITIONS.minimax.name, args: ['acp'], login: ['login'], approve: true },
+  minimax: { label: AGENT_DEFINITIONS.minimax.name, args: ['acp'], login: ['login'], logout: ['logout'], approve: true },
   /* DeepSeek Harness (`dsh`) speaks ACP as its `acp` profile. It has no sign-in command: the person signs in to their
      DeepSeek account in its desktop app, or sets DEEPSEEK_API_KEY, so one found is connected. It reports every tool
      as kind `other`, titled by its name: `toolKinds` gives each the kind it is (see withToolKind) */
@@ -406,7 +411,9 @@ export function readAgentStatus(id, stdout, out) {
   if (/\bnot logged in\b/i.test(out)) return { signedIn: false, account: null };
   if (/\blogged in\b/i.test(out)) {
     const method = /chatgpt/i.test(out) ? 'chatgpt' : /api key/i.test(out) ? 'api-key' : 'other';
-    return { signedIn: true, account: { method } };
+    /* Cursor: "✓ Logged in as name@example.com" */
+    const email = /\blogged in as\s+([^\s@]+@[^\s@]+\.[^\s@]+)/i.exec(out)?.[1];
+    return { signedIn: true, account: { method, ...(email ? { email } : {}) } };
   }
   return { signedIn: null, account: null };
 }
@@ -634,6 +641,23 @@ export async function openAgentSignIn(id, { track = false } = {}) {
 }
 
 /**
+ * Sign out of an agent with its own command (`logout`), run here with no window: Switch account signs out, then opens
+ * the agent's sign-in (openAgentSignIn). What it said is the error when it fails. Whether it is signed in is asked
+ * afresh from then on.
+ */
+export async function signOutAgent(id) {
+  const spec = AGENTS[id];
+  if (!spec?.logout) return { ok: false, error: `${spec?.label ?? id} has no sign-out command: switch accounts in ${spec?.label ?? id} itself.` };
+  const cli = resolveAgentCli(id, { pathDirs: (await loginShellEnvironment()).PATH.split(PATH_SEP) });
+  if (!cli) return { ok: false, error: `${spec.label} is not installed on this computer.` };
+  const shell = agentShell(id, await loginShellVariables());
+  const how = starting(cli.path, spec.logout);
+  const r = await run(how.cmd, how.args, 30_000, { cwd: probeFolder(), env: childEnvironment({ shell, extra: { ...agentDefaults(id, shell), ...how.env } }), options: how.options });
+  asked.delete(id);
+  return r.ok ? { ok: true } : { ok: false, error: `${spec.label} did not sign out. ${r.out.trim().slice(0, 500)}`.trim() };
+}
+
+/**
  * Install an agent with its maker's official installer (installCommand), in a window the person sees: Terminal on a
  * Mac, PowerShell on Windows. The person agreed to that exact command in Settings → Agents first. Whether it worked is
  * learnt by looking for the agent again (agent-roster.mjs).
@@ -688,6 +712,8 @@ async function agentOnComputer(id, pathDirs, { fresh = false } = {}) {
     cli: cli ? { path: cli.path, source: cli.source } : null,
     chosen: chosenPaths[id] ?? null,
     ...(cli ? ownSignIn(AGENTS[id], await agentStatus(id, cli.path, { fresh })) : { signedIn: null, account: null }),
+    /* it signs out with its own command: Switch account signs in to another account from Settings */
+    ...(cli && AGENTS[id].logout ? { signOut: true } : {}),
     install,
     setupRequired: claudeApp ? 'code-tab' : null,
     ...(cli ? {} : { app: claudeApp ? null : app, installer: installCommand(id) }),

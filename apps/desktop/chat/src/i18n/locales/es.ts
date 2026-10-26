@@ -161,6 +161,8 @@ export const es: Words = {
     copyDiagnostics: 'Copiar informe de diagnóstico',
     copyDiagnosticsHint: 'Lo que OpenFilm encuentra en este equipo y sus problemas recientes, para pegar en un issue',
     diagnosticsCopied: 'Copiado',
+    switchAccount: 'Cambiar de cuenta',
+    signedInAs: 'Sesión iniciada como {account}.',
     removeFile: 'Quitar archivo',
     removeImage: 'Quitar imagen',
     speed: 'Velocidad',

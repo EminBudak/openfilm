@@ -60,6 +60,7 @@ import type { TurnFileChanges } from '@/lib/file-changes';
 import { readBalance, type TurnBalance } from '@/lib/balance';
 import { BalanceNotice } from '@/components/BalanceNotice';
 import { CopyDiagnostics } from '@/components/CopyDiagnostics';
+import { accountName, accountTrouble } from '@/lib/account-trouble';
 import { readStudioFilm } from '@/lib/studio-film';
 import { studioRefsFromTransfer, transferHasStudioRefs } from '@/lib/studio-transfer';
 import { agentModelSummary, agentOptions, currentAgent, effectivePrefs, offeredOption, useLocalAgents } from '@/state/local-agent-store';
@@ -793,6 +794,10 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
   );
 
   const agentName = agent === 'byok' ? t('composer.agentOwnKey') : la.roster?.find((a) => a.id === agent)?.name ?? agent;
+  /* the last turn failed for the account of the person's own agent it ran on: Switch account, and whose it is */
+  const failedOn = asset?.localAgent?.id ?? agent;
+  const switchFor = turnError && failedOn !== 'byok' && accountTrouble(turnError) && desktopBridge()?.openSettings
+    ? { who: accountName(la.roster?.find((a) => a.id === failedOn)?.account) } : null;
   const wasName = agentWas === 'byok' ? t('composer.agentOwnKey') : agentWas ? la.roster?.find((a) => a.id === agentWas)?.name ?? AGENT_DEFINITIONS[agentWas]?.name ?? agentWas : '';
 
   const editComposerCard = (
@@ -1098,6 +1103,15 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
                   {turnError ? (
                     <p role="alert" className="text-xs text-[var(--err)]">
                       {turnError}{' '}
+                      {/* failed for its account: whose it is, and Settings → Agents to switch it */}
+                      {switchFor ? (
+                        <span className="text-[var(--text-muted)]">
+                          {switchFor.who ? `${t('composer.signedInAs').replace('{account}', switchFor.who)} ` : null}
+                          <button type="button" onClick={() => desktopBridge()?.openSettings?.('agents')} className="underline underline-offset-2 hover:text-[var(--text)]">
+                            {t('composer.switchAccount')}
+                          </button>{' '}
+                        </span>
+                      ) : null}
                       {/* what to send when it keeps failing */}
                       <span className="text-[var(--text-muted)]"><CopyDiagnostics /></span>
                     </p>

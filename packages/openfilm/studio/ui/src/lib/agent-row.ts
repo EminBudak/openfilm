@@ -12,6 +12,16 @@ export function missingActions(agent: Pick<HostAgent, 'setupRequired' | 'install
 }
 
 /**
+ * How a connected agent switches account: `here`, one that signs out with its own command (the app signs it out and
+ * opens its sign-in); `elsewhere`, in the agent itself or its maker's app, as the row then says. Null for the own key
+ * and for one not connected.
+ */
+export function switchOffer(agent: Pick<HostAgent, 'id' | 'status' | 'signOut'>, host: { switchAccount: boolean }): 'here' | 'elsewhere' | null {
+  if (agent.id === 'byok' || agent.status !== 'ready') return null;
+  return agent.signOut && host.switchAccount ? 'here' : 'elsewhere';
+}
+
+/**
  * The organization an account's line names, unless it only says the email again: a personal Claude account's
  * organization is "<email>'s Organization".
  */

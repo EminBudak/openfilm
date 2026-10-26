@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { AgentSession, CLIENT_CAPABILITIES, agentDefaults, closeEverySession, planProblem, probeFolder, CODEX_UTF8_CMD, agentShell, allowOption, codexDeveloperInstructions, codexLaunchEnv, distinctOptions, errorCause, legacyOptions, optionsForModel, powerShellScript, powerShellLine, powerShellWindowLaunch, terminalScript, checkAgentProgram, readAgentStatus, setChosenPaths, signInScript, turnError, signInError, codexTooOld, AGENTS, ownSignIn, codexServiceError, codexRefusal, codexNotice, explainFailure, stderrReason, withToolKind, OWN_GROUP, stopTree, winArg } from './agents.mjs';
 import { spawn } from 'node:child_process';
-import { acpSignedIn } from './agents.mjs';
+import { acpSignedIn, signOutAgent } from './agents.mjs';
 
 test('a fresh sign-in check bypasses a cached signed-out result and shares the pending probe', async () => {
   const { mkdtempSync, readFileSync, writeFileSync, rmSync } = await import('node:fs');
@@ -132,6 +132,17 @@ test('whose sign-in it is, as each program says it, never a key', () => {
   assert.deepEqual(read, { signedIn: true, account: { method: 'api-key' } });
   assert.ok(!JSON.stringify(read).includes('sk-'), 'no part of a key');
   assert.deepEqual(readAgentStatus('codex', 'Not logged in\n', 'Not logged in\n'), { signedIn: false, account: null });
+  const cursor = '\n✓ Logged in as me@example.test\n';
+  assert.deepEqual(readAgentStatus('cursor', cursor, cursor), { signedIn: true, account: { method: 'other', email: 'me@example.test' } });
+});
+
+test('the agents that sign out with a command of their own, run with no window, can switch account here', () => {
+  const logouts = Object.fromEntries(Object.entries(AGENTS).map(([id, spec]) => [id, spec.logout ?? null]));
+  assert.deepEqual(logouts, {
+    claude: ['auth', 'logout'], cursor: ['logout'], minimax: ['logout'],
+    /* Codex signs in in Codex (its app shares the sign-in); OpenCode's asks which account; the others have none */
+    codex: null, copilot: null, opencode: null, codebuddy: null, qwen: null, kimi: null, deepseek: null,
+  });
 });
 
 test('settings Codex cannot read: it cannot say whether it is signed in, and says why', () => {
@@ -639,4 +650,52 @@ test("a word for cmd.exe keeps its % as it is: no variable's value is put in its
   const words = ['50% of %PATH%', 'open "film"', '%USERNAME%'];
   const r = spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', `"${[shim, ...words].map(winArg).join(' ')}"`], { encoding: 'utf8', windowsVerbatimArguments: true, windowsHide: true });
   assert.deepEqual(JSON.parse(r.stdout.trim()), words);
+});
+
+test("signing out runs the agent's own sign-out with no window, says what it said when it fails, and asks afresh after", async () => {
+  const { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dir = mkdtempSync(join(tmpdir(), 'of-sign-out-'));
+  const signedIn = join(dir, 'signed-in');
+  const ran = join(dir, 'ran');
+  /* MiniMax Code as a fake: \`logout\` forgets its sign-in (or fails, told to); \`acp\` opens a session only signed in */
+  const program = join(dir, 'mcode.mjs');
+  writeFileSync(program, `
+    import { createInterface } from 'node:readline';
+    import { appendFileSync, existsSync, rmSync } from 'node:fs';
+    const args = process.argv.slice(2);
+    appendFileSync(${JSON.stringify(ran)}, args.join(' ') + '\\n');
+    if (args[0] === 'logout') {
+      if (existsSync(${JSON.stringify(join(dir, 'fail'))})) { process.stderr.write('Keychain is locked'); process.exit(1); }
+      rmSync(${JSON.stringify(signedIn)}, { force: true });
+      process.exit(0);
+    }
+    const send = (message) => process.stdout.write(JSON.stringify(message) + '\\n');
+    createInterface({ input: process.stdin }).on('line', (line) => {
+      const request = JSON.parse(line);
+      if (request.method === 'initialize') send({ jsonrpc: '2.0', id: request.id, result: { protocolVersion: 1, agentCapabilities: {}, authMethods: [] } });
+      if (request.method === 'session/new') send({ jsonrpc: '2.0', id: request.id, ...(existsSync(${JSON.stringify(signedIn)})
+        ? { result: { sessionId: 'sign-out-test' } } : { error: { code: -32000, message: 'Authentication required' } }) });
+    });
+  `);
+  writeFileSync(signedIn, 'yes');
+  setChosenPaths({ minimax: program });
+  try {
+    assert.equal(await acpSignedIn('minimax'), true);
+    writeFileSync(join(dir, 'fail'), '');
+    const failed = await signOutAgent('minimax');
+    assert.equal(failed.ok, false);
+    assert.match(failed.error, /^MiniMax Code did not sign out\. .*Keychain is locked/);
+    assert.ok(existsSync(signedIn), 'still signed in as it was');
+    rmSync(join(dir, 'fail'));
+    assert.deepEqual(await signOutAgent('minimax'), { ok: true });
+    assert.ok(!existsSync(signedIn));
+    assert.equal(await acpSignedIn('minimax'), false, 'the signed-in answer kept for ten minutes is forgotten');
+    assert.deepEqual(readFileSync(ran, 'utf8').trim().split('\n').filter((l) => l === 'logout'), ['logout', 'logout']);
+    /* one with no sign-out command is never run */
+    const none = await signOutAgent('qwen');
+    assert.equal(none.ok, false);
+    assert.match(none.error, /Qwen Code has no sign-out command/);
+  } finally { setChosenPaths({}); closeEverySession(); rmSync(dir, { recursive: true, force: true }); }
 });

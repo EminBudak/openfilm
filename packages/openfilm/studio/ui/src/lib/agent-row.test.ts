@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { accountOrg, missingActions, ownModelError } from './agent-row.ts';
+import { accountOrg, missingActions, ownModelError, switchOffer } from './agent-row.ts';
 import { zhCN } from '../i18n/zh-CN.ts';
 
 test('an agent not found offers Locate and its installer, or its install page', () => {
@@ -28,4 +28,13 @@ test("an own model not saved is said in the person's language, with the address,
   assert.equal(ownModelError({ error: 'in English', code: 'no-key' }, t), '请粘贴密钥。');
   assert.equal(ownModelError({ error: 'Unknown parameter: max_output_tokens' }, t), 'Unknown parameter: max_output_tokens');
   assert.equal(ownModelError({ error: 'from a newer app', code: 'something-new' }, t), 'from a newer app');
+});
+
+test('a connected agent switches account here when it signs out with its own command; else the row says where', () => {
+  const host = { switchAccount: true };
+  assert.equal(switchOffer({ id: 'claude', status: 'ready', signOut: true }, host), 'here');
+  assert.equal(switchOffer({ id: 'deepseek', status: 'ready' }, host), 'elsewhere');
+  assert.equal(switchOffer({ id: 'claude', status: 'ready', signOut: true }, { switchAccount: false }), 'elsewhere', 'an older app');
+  assert.equal(switchOffer({ id: 'claude', status: 'off', signOut: true }, host), null);
+  assert.equal(switchOffer({ id: 'byok', status: 'ready' }, host), null);
 });

@@ -94,6 +94,8 @@ export interface StudioHost {
     /** Stop waiting for terminal sign-in without disconnecting the agent or changing its own sign-in. */
     cancelSignIn?: (id: HostAgentId) => Promise<unknown>;
     disconnect: (id: HostAgentId) => Promise<unknown>;
+    /** Another account, for one that signs out with its own command (`HostAgent.signOut`): signed out, then its sign-in opened. An older app has none. */
+    switchAccount?: (id: HostAgentId) => Promise<{ ok: boolean; error?: string }>;
     /** Codex: what is left of its plan, as it says for the account signed in (null: it can't say; other agents, null) */
     usage?: (id: HostAgentId, fresh?: boolean) => Promise<HostAgentUsage | null>;
     setShown: (id: HostAgentId, shown: boolean) => Promise<unknown>;
@@ -250,6 +252,8 @@ export interface HostAgent {
   /** Found, but it cannot read its own settings (Codex's config file), as it says: no session starts until fixed. */
   problem?: string;
   account?: HostAgentAccount;
+  /** It signs out with its own command, so the app can switch its account (`agents.switchAccount`); else that is done in the agent itself. */
+  signOut?: boolean;
   /** The own key's models, each set up on its own; the first is the one a conversation starts on. */
   byok?: { models: HostOwnModel[] };
 }

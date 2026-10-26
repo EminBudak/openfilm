@@ -380,6 +380,60 @@ test('disconnecting only stops OpenFilm using an agent; connecting again uses th
   assert.deepEqual(closed, ['claude', 'claude', 'claude'], 'its sessions closed each time: none goes on with the old account');
 });
 
+test('switching account signs the agent out with no window, closes its sessions, and waits for its sign-in to another account', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'of-roster-'));
+  let state = { signedIn: true, account: { method: 'claude.ai', email: 'old@example.test', org: 'Old Org' } };
+  const claude = () => ({ id: 'claude', cli: { path: '/bin/claude' }, ...state, signOut: true, install: null, setupRequired: null });
+  const steps = [];
+  const r = roster(dir, undefined, {
+    localAgents: async () => [claude()],
+    localAgent: async () => claude(),
+    closeSessions: (id) => steps.push(`close ${id}`),
+    signOut: async (id) => { steps.push(`sign out ${id}`); state = { signedIn: false, account: null }; return { ok: true }; },
+    openSignIn: async (id) => { steps.push(`sign in ${id}`); return { ok: true }; },
+    signInWait: { ms: 2000, pollMs: 10 },
+  });
+  await r.connect('claude');
+  const before = r.list().find((a) => a.id === 'claude');
+  assert.equal(before.status, 'ready');
+  assert.equal(before.signOut, true, 'it can switch here');
+  steps.length = 0;
+  assert.deepEqual(await r.switchAccount('claude'), { ok: true });
+  assert.deepEqual(steps, ['close claude', 'sign out claude', 'sign in claude'], 'no session goes on with the old account');
+  const waiting = r.list().find((a) => a.id === 'claude');
+  assert.equal(waiting.status, 'waiting');
+  assert.equal(waiting.account, undefined, 'the old account is no longer shown');
+  state = { signedIn: true, account: { method: 'claude.ai', email: 'new@example.test' } };
+  await new Promise((done) => setTimeout(done, 60));
+  const after = r.list().find((a) => a.id === 'claude');
+  assert.equal(after.status, 'ready');
+  assert.equal(after.account.email, 'new@example.test');
+});
+
+test('a sign-out that fails leaves the agent signed in as it was, with what it said; one that cannot switch here is refused', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'of-roster-'));
+  const cursor = { id: 'cursor', cli: { path: '/bin/cursor-agent' }, signedIn: true, account: { method: 'other', email: 'me@example.test' }, signOut: true, install: null, setupRequired: null };
+  const opened = [];
+  const r = roster(dir, undefined, {
+    localAgents: async () => [cursor],
+    signOut: async () => ({ ok: false, error: 'Cursor did not sign out. Keychain is locked' }),
+    openSignIn: async (id) => { opened.push(id); return { ok: true }; },
+  });
+  await r.connect('cursor');
+  assert.deepEqual(await r.switchAccount('cursor'), { ok: false, error: 'Cursor did not sign out. Keychain is locked' });
+  const row = r.list().find((a) => a.id === 'cursor');
+  assert.equal(row.status, 'ready');
+  assert.equal(row.account.email, 'me@example.test');
+  assert.equal(row.error, 'Cursor did not sign out. Keychain is locked');
+  assert.deepEqual(opened, [], 'no sign-in opened');
+  assert.equal((await r.switchAccount('byok')).ok, false);
+  /* an app without the sign-out: Settings says where to switch instead */
+  const older = roster(mkdtempSync(join(tmpdir(), 'of-roster-')), undefined, { localAgents: async () => [cursor] });
+  await older.connect('cursor');
+  assert.equal(older.list().find((a) => a.id === 'cursor').signOut, undefined);
+  assert.equal((await older.switchAccount('cursor')).ok, false);
+});
+
 test("Codex found but unable to read its own settings says so, with what it said", async () => {
   const dir = mkdtempSync(join(tmpdir(), 'of-roster-'));
   const problem = 'Error loading configuration: config.toml:2:16: unknown variant `full`';

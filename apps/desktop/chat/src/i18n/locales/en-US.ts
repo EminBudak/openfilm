@@ -161,6 +161,8 @@ export const enUS = {
     copyDiagnostics: 'Copy diagnostic report',
     copyDiagnosticsHint: 'What OpenFilm finds on this computer and its recent problems, to paste into an issue',
     diagnosticsCopied: 'Copied',
+    switchAccount: 'Switch account',
+    signedInAs: 'Signed in as {account}.',
     removeFile: 'Remove file',
     removeImage: 'Remove image',
     speed: 'Speed',

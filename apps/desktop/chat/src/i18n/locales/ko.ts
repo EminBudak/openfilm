@@ -157,6 +157,8 @@ export const ko: Words = {
     copyDiagnostics: '진단 보고서 복사',
     copyDiagnosticsHint: '이 컴퓨터에서 OpenFilm이 확인한 상태와 최근 문제, issue에 붙여 넣을 수 있습니다',
     diagnosticsCopied: '복사됨',
+    switchAccount: '계정 전환',
+    signedInAs: '{account}(으)로 로그인되어 있습니다.',
     removeFile: '파일 제거',
     removeImage: '이미지 제거',
     speed: '속도',

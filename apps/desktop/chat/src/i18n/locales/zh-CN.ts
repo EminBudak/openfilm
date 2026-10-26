@@ -161,6 +161,8 @@ export const zhCN: Words = {
     copyDiagnostics: '复制诊断信息',
     copyDiagnosticsHint: 'OpenFilm 在这台电脑上找到的情况和最近的问题，可以贴进 issue',
     diagnosticsCopied: '已复制',
+    switchAccount: '切换账号',
+    signedInAs: '当前登录：{account}。',
     removeFile: '移除文件',
     removeImage: '移除图片',
     speed: '速度',

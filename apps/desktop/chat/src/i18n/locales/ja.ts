@@ -161,6 +161,8 @@ export const ja: Words = {
     copyDiagnostics: '診断レポートをコピー',
     copyDiagnosticsHint: 'このコンピュータで OpenFilm が見つけた状況と最近の問題。issue に貼り付けられます',
     diagnosticsCopied: 'コピーしました',
+    switchAccount: 'アカウントを切り替え',
+    signedInAs: '{account} でサインイン中です。',
     removeFile: 'ファイルを削除',
     removeImage: '画像を削除',
     speed: '速度',

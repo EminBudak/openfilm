@@ -3,10 +3,11 @@
  *
  *   · codex, claude, copilot, cursor, opencode, codebuddy, qwen, kimi, minimax, deepseek — the person's own agents
  *     (agents.mjs): Codex, Claude Code, GitHub Copilot, Cursor, OpenCode, CodeBuddy, Qwen Code, Kimi, MiniMax Code and
- *     DeepSeek Harness. Each uses the account signed in on the computer as it is: connecting opens Terminal for its own
+ *     DeepSeek Harness. Each uses the account its own program is signed in to: connecting opens Terminal for its own
  *     sign-in command only when it is signed out (never Codex's or DeepSeek Harness's: each is signed in in its own
  *     app, so one found is connected), disconnecting only stops OpenFilm using it, and connecting again uses whichever
- *     account is signed in then (one switched in the agent or its maker's app). `account` says whose it is. Codex and
+ *     account is signed in then. `account` says whose it is. One with a sign-out command (`signOut`) switches account
+ *     here (`switchAccount`): signed out, its sessions closed, its sign-in opened and waited for. Codex and
  *     Claude Code are shown in the chat's menu from the start; the others once the person connects one or switches it
  *     on. Codex is connected from the start, Claude Code once the person connects it.
  *   · byok — the app's own agent (Pi, pi-agent.mjs) on the person's own models, each set up on its own: the name the
@@ -214,6 +215,7 @@ export async function probeModel({ format, baseUrl, key, model, fetch: fetchImpl
  *   localAgents: () => Promise<Array<{ id: string, cli: { path: string } | null, signedIn: boolean | null, account?: object | null, problem?: string, install: string | null, setupRequired: string | null, app?: string | null, installer?: string | null }>>,
  *   localAgent?: (id: string, options?: { fresh?: boolean }) => Promise<{ id: string, cli: { path: string } | null, signedIn: boolean | null, account?: object | null, problem?: string, install: string | null, setupRequired: string | null, app?: string | null, installer?: string | null }>,
  *   openSignIn: (id: string) => Promise<{ ok: boolean, error?: string, isOpen?: () => Promise<boolean | null> }>,
+ *   signOut?: (id: string) => Promise<{ ok: boolean, error?: string }>,
  *   openInstaller?: (id: string) => Promise<{ ok: boolean, error?: string }>,
  *   usePaths?: (paths: Record<string, string>) => void,
  *   pickProgram?: (id: string, words?: { title?: string, button?: string }) => Promise<string | null>,
@@ -268,7 +270,8 @@ export function createRoster(deps) {
       }
       if (choices.disconnected.includes(id)) return { status: 'off', ...where };
       if (found.signedIn === false) return { status: live.waiting[id] ? 'waiting' : 'sign-in', ...where };
-      return { status: 'ready', ...where, ...(found.account ? { account: { ...found.account } } : {}), ...(found.problem ? { problem: found.problem } : {}) };
+      return { status: 'ready', ...where, ...(found.account ? { account: { ...found.account } } : {}), ...(found.problem ? { problem: found.problem } : {}),
+        ...(found.signOut && deps.signOut ? { signOut: true } : {}) };
     }
     if (choices.disconnected.includes(id)) return { status: 'off' };
     if (!keyed().length) return { status: 'key' };
@@ -407,6 +410,28 @@ export function createRoster(deps) {
         changed();
         return { ok: false, error: live.errors[id] };
       }
+    },
+
+    /**
+     * Another account, for one that signs out with its own command: its sessions close (the next message starts on the
+     * new account), it signs out with no window, and its sign-in opens and is waited for, as Sign in's is. A sign-out
+     * that fails leaves it as it was, with what it said.
+     */
+    async switchAccount(id) {
+      if (!isOwn(id) || !deps.signOut) return { ok: false, error: `No agent ${id}` };
+      delete live.errors[id];
+      cancelSignIn(id);
+      deps.closeSessions(id);
+      const out = await deps.signOut(id).catch((e) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+      if (!out.ok) { live.errors[id] = out.error || `${AGENT_NAMES[id]} did not sign out.`; changed(); return { ok: false, error: live.errors[id] }; }
+      /* signed out now: said at once, and kept over an older answer still on its way */
+      local = (local ?? []).map((a) => (a.id === id ? { ...a, signedIn: false, account: null } : a));
+      revision.set(id, (revision.get(id) ?? 0) + 1);
+      changed();
+      const opened = await deps.openSignIn(id);
+      if (!opened.ok) { live.errors[id] = opened.error ?? 'Terminal did not open.'; changed(); return { ok: false, error: live.errors[id] }; }
+      void waitForSignIn(id, opened.isOpen);
+      return { ok: true };
     },
 
     /** Disconnect here only: its sessions close; its own sign-in stays as it is (connecting again uses it as it is then). */

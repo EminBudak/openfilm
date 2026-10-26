@@ -27,7 +27,7 @@ import { registerLocalAgentIpc } from './local-agents-ipc.mjs';
 import { readPreferences, registerChatIpc } from './chat-ipc.mjs';
 import { registerSkillsIpc } from './skills-ipc.mjs';
 import { createRoster } from './agent-roster.mjs';
-import { checkAgentProgram, closeEverySession, diagnoseAgent, listAgents, localAgent, openAgentInstaller, openAgentSignIn, setChosenPaths } from './agents.mjs';
+import { checkAgentProgram, closeEverySession, diagnoseAgent, listAgents, localAgent, openAgentInstaller, openAgentSignIn, setChosenPaths, signOutAgent } from './agents.mjs';
 import { agentUsage, forgetAgentUsage } from './agent-usage.mjs';
 import { installOpenfilmCommand } from './openfilm-command.mjs';
 import { startUpdates } from './updates.mjs';
@@ -616,9 +616,12 @@ async function start() {
     localAgents: listAgents,
     localAgent,
     openSignIn: (id) => openAgentSignIn(id, { track: true }),
+    /* Switch account: its own sign-out, with no window, before its sign-in */
+    signOut: signOutAgent,
     /* an agent's official installer, in a terminal window, once the person agreed to it in Settings → Agents */
     openInstaller: openAgentInstaller,
-    /* sessions closed on connecting and disconnecting: the next look at its usage is for whichever account is used now */
+    /* sessions closed on connecting, disconnecting and switching account: the next look at its usage is for whichever
+       account is used now */
     closeSessions: (id) => { forgetAgentUsage(id); localAgents?.closeAgent(id); },
     seal,
     unseal,
@@ -640,6 +643,7 @@ async function start() {
   agentHandle('desktop:agents:connect', ({ id }) => roster.connect(String(id)));
   agentHandle('desktop:agents:cancel-sign-in', ({ id }) => { roster.cancelSignIn(String(id)); return { ok: true }; });
   agentHandle('desktop:agents:disconnect', ({ id }) => { roster.disconnect(String(id)); return { ok: true }; });
+  agentHandle('desktop:agents:switch-account', ({ id }) => roster.switchAccount(String(id)));
   /* what is left of Claude Code's and Codex's plan, on OpenFilm's sign-in (agent-usage.mjs); null when it can't say */
   agentHandle('desktop:agents:usage', ({ id, fresh }) => agentUsage(String(id), { fresh: fresh === true }));
   agentHandle('desktop:agents:locate', ({ id, words }) => roster.locate(String(id), words));
