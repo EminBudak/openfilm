@@ -103,7 +103,7 @@ writeFileSync(join(stage, 'package.json'), `${JSON.stringify({
   type: 'module',
   main: 'src/main.mjs',
   dependencies,
-  overrides: lockedOverrides(lockedTree),
+  overrides: lockedOverrides(lockedTree, pkg.dependencies),
 }, null, 2)}\n`);
 run('npm', ['install', '--omit=dev', '--omit=optional', '--no-audit', '--no-fund', '--no-package-lock', '--loglevel=error'], { cwd: stage });
 const offLock = versionsOffLock(lockedTree, join(stage, 'node_modules'));

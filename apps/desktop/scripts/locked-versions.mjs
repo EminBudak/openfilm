@@ -13,12 +13,13 @@ const SEMVER = /^\d+\.\d+\.\d+(?:-[\w.]+)?$/;
 /**
  * npm `overrides` from `pnpm list --prod --depth Infinity --json` of the package (its first entry). A package locked at
  * one version is pinned to it; one locked at several is pinned under each package that depends on it. The package's
- * own dependencies are exact in its package.json already; one that another package depends on too is pinned to that
- * (`$name`, the only override npm takes for one), as pnpm's own overrides lift a version a dependency pins (undici,
- * pinned at 8.10.2 by pi-coding-agent).
- * @param {{ dependencies?: Record<string, any> }} tree
+ * own dependencies (`own`, its package.json's) are left to their specs; one exact there that another package depends on
+ * too is pinned to it, as pnpm's own overrides lift a version a dependency pins (undici, pinned at 8.10.2 by
+ * pi-coding-agent). npm takes an override of the package's own dependency only when it is that very spec (npm 10 does
+ * not resolve `$name`).
+ * @param {{ dependencies?: Record<string, any> }} tree @param {Record<string, string>} [own]
  */
-export function lockedOverrides(tree) {
+export function lockedOverrides(tree, own = {}) {
   /** @type {Map<string, Set<string>>} */
   const versions = new Map();
   /** @type {Array<[string, string, string]>} parent, child, child's version */
@@ -43,7 +44,7 @@ export function lockedOverrides(tree) {
   for (const [name, set] of versions) {
     if (set.size !== 1) continue;
     if (!direct.has(name)) overrides[name] = [...set][0];
-    else if (nested.has(name)) overrides[name] = `$${name}`;
+    else if (nested.has(name) && own[name] === [...set][0]) overrides[name] = own[name];
   }
   for (const [parent, child, version] of edges) {
     if (versions.get(child).size === 1) continue;
