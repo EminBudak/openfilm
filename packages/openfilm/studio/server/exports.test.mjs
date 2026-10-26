@@ -26,6 +26,10 @@ function children(parent, pattern) {
   if (listed.status !== 0) throw new Error(`the process list did not answer: ${listed.error?.message ?? listed.stderr}`);
   return listed.stdout.split(/\r?\n/).filter((line) => new RegExp(pattern).test(line.slice(line.indexOf(' ') + 1))).map((line) => Number(line.split(' ')[0]));
 }
+/** End a process as a crash would; one gone already (a browser's helper, ended with the browser) is ended. */
+function end(pid) {
+  try { process.kill(pid, 'SIGKILL'); } catch (e) { if (/** @type {NodeJS.ErrnoException} */ (e).code !== 'ESRCH') throw e; }
+}
 /* the tests that end an export's processes find them in the process list, which on Windows (WMI) can stop answering */
 const processes = { skip: process.platform === 'win32' && (() => { try { children(process.pid, '.'); return false; } catch { return 'the process list does not answer'; } })() };
 let root, scratch;
@@ -246,7 +250,7 @@ test('a video whose browser is ended partway, as a crash would end it, is drawn 
     if (!browsers.length) await new Promise((r) => setTimeout(r, 25));
   }
   assert.ok(browsers.length, 'the film draws in a browser of the render process');
-  for (const pid of browsers) process.kill(pid, 'SIGKILL');
+  for (const pid of browsers) end(pid);
   const done = await ended(exports, job);
   assert.equal(done.status, 'done', done.error);
 });
@@ -265,7 +269,7 @@ test('a cancelled export stops and leaves no file, and a bad ask is refused befo
   assert.ok(!existsSync(running.out), 'the half-written file is gone');
   assert.deepEqual(readdirSync(exportsRoot()).filter((n) => n.startsWith('Cancel') || n.includes('.partial-')), [], 'nothing under its name, nothing half made');
   for (const bad of [{ kind: 'pdf' }, { kind: 'video', range: [3, 1] }, { kind: 'video', codec: 'av1' }, { kind: 'video', frame: '9:1' }, { kind: 'video', frame: 'wide' },
-    { kind: 'audio', mix: false }, { kind: 'stills', range: [0, 1] }, { kind: 'gif', width: 5000 }, { kind: 'subtitles', format: 'ass' },
+    { kind: 'audio', mix: false }, { kind: 'stills', range: [0, 1] }, { kind: 'stills', as: 'pdf' }, { kind: 'gif', width: 5000 }, { kind: 'subtitles', format: 'ass' },
     { kind: 'slides', format: 'key' }, { kind: 'slides', range: [0, 1] }, { kind: 'nle', fps: 500 }, { kind: 'nle', audio: 'mix' }, { kind: 'nle', range: [0, 1] },
     { kind: 'nle', format: 'fcpxml', alpha: 'png' }, { kind: 'nle', alpha: 'auto' }, { kind: 'nle', format: 'jianying', alpha: 'hevc_alpha' }, { kind: 'nle', format: 'jianying', alpha: 'prores4444' }]) {
     assert.throws(() => exports.start(project(), bad), ExportError, JSON.stringify(bad));
@@ -467,11 +471,28 @@ test('scene stills: the middle of each picture clip, zipped; a poster: one frame
   const stills = await exported({ kind: 'stills', format: 'png', shortEdge: 90 });
   assert.equal(stills.out, join(exportsRoot(), 'Tiny stills.zip'));
   assert.deepEqual(zipNames(stills.out).names, ['01 title.png', '02 badge.png']);
+  /* the moments picked, each named by the scene it is in: of two showing, the one that started last */
+  const picked = await exported({ kind: 'stills', format: 'png', shortEdge: 90, at: [0.2, 0.7, 0.9] }, 'Picked');
+  assert.deepEqual(zipNames(picked.out).names, ['01 title.png', '02 badge.png', '03 badge.png']);
   const poster = await exported({ kind: 'poster', format: 'jpg', at: 0.25, frame: '1:1', shortEdge: 100 });
   assert.equal(poster.out, join(exportsRoot(), 'Tiny poster.jpg'));
   const jpg = readFileSync(poster.out);
   assert.equal(jpg[0], 0xff);
   assert.equal(probe(poster.out, 'stream=width,height'), '100,100');
+});
+
+test('picked frames export as separate images or an explicit zip, including a one-frame zip', ffmpeg, async () => {
+  const files = await exported({ kind: 'stills', as: 'files', format: 'png', shortEdge: 90, at: [0.2, 0.7] }, 'Separate');
+  assert.deepEqual(files.outputs.map((f) => basename(f)), ['Separate stills 01 title.png', 'Separate stills 02 badge.png']);
+  assert.equal(files.out, files.outputs[0]);
+  for (const file of files.outputs) assert.equal(probe(file, 'stream=width,height'), '160,90');
+  const original = readFileSync(files.outputs[0]);
+  const again = await exported({ kind: 'stills', as: 'files', format: 'png', shortEdge: 90, at: [0.2] }, 'Separate');
+  assert.notEqual(again.out, files.outputs[0], 'an existing image is never overwritten');
+  assert.deepEqual(readFileSync(files.outputs[0]), original);
+  const zip = await exported({ kind: 'stills', as: 'zip', format: 'jpg', shortEdge: 90, at: [0.2] }, 'One zipped');
+  assert.ok(zip.out.endsWith('.zip'));
+  assert.deepEqual(zipNames(zip.out).names, ['01 title.jpg']);
 });
 
 test('several exports at once, into a folder of the person\'s; one wrong ask queues none', ffmpeg, async () => {
@@ -530,6 +551,10 @@ test('slides: a PowerPoint deck and a PDF, one page per scene, the scene named i
       assert.ok(parts.has(resolved), `${name} → ${resolved}`);
     }
   }
+  /* the moments picked, a page each, each named by its scene */
+  const picked = zipEntries((await exported({ kind: 'slides', format: 'pptx', shortEdge: 180, at: [0.2, 0.3, 0.7] }, 'Picked')).out);
+  assert.ok(picked.has('ppt/slides/slide3.xml') && !picked.has('ppt/slides/slide4.xml'), 'three moments, three slides');
+  assert.deepEqual([1, 2, 3].map((n) => picked.get(`ppt/notesSlides/notesSlide${n}.xml`).toString().match(/<a:t>([^<]*)<\/a:t>/)?.[1]), ['title', 'title', 'badge']);
   const pdf = await exported({ kind: 'slides', format: 'pdf', shortEdge: 180, frame: '1:1' }, 'Deck');
   assert.equal(pdf.out, join(exportsRoot(), 'Deck.pdf'));
   const bytes = readFileSync(pdf.out).toString('latin1');
@@ -1094,7 +1119,7 @@ test('剪映: the pages\' browsers, ended partway as a crash would end them, are
   assert.ok(worker, 'the pages draw in a process of their own');
   const browsers = children(worker, 'chrom');
   assert.ok(browsers.length, 'with browsers of its own');
-  for (const pid of browsers) process.kill(pid, 'SIGKILL');
+  for (const pid of browsers) end(pid);
   const done = await ended(exports, job);
   assert.equal(done.status, 'done', done.error);
   for (const id of ['a', 'b', 'c']) assert.equal(frameCount(join(dirname(done.out), 'media', `${id}.mov`)), 120, `${id}: every frame`);
