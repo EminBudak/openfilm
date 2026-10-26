@@ -23,6 +23,7 @@ export interface RosterAgent {
   status: 'ready' | 'off' | 'sign-in' | 'waiting' | 'missing' | 'key' | 'checking';
   install?: string | null;
   setupRequired?: string | null;
+  configurationRevision?: number;
   error?: string;
   /** Whose sign-in it uses, when the agent tells (no key or token). */
   account?: { method: string; email?: string; org?: string; plan?: string };

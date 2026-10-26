@@ -41,6 +41,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { PI_APIS, contextLength, modelEffort } from './pi-config.mjs';
+import { agentConnectionIssue } from './agent-connection-issue.mjs';
 
 import { AGENT_DEFINITIONS, AGENT_IDS, OWN_AGENT_IDS, isAgentId } from './agent-definitions.mjs';
 export { AGENT_IDS, OWN_AGENT_IDS } from './agent-definitions.mjs';
@@ -212,16 +213,17 @@ export async function probeModel({ format, baseUrl, key, model, fetch: fetchImpl
  *
  * @param {{
  *   dataDir: string,
- *   localAgents: () => Promise<Array<{ id: string, cli: { path: string } | null, signedIn: boolean | null, account?: object | null, problem?: string, install: string | null, setupRequired: string | null, app?: string | null, installer?: string | null }>>,
+ *   localAgents: (options?: { ids?: string[], statusIds?: string[], fresh?: boolean, onAgent?: (agent: any) => void }) => Promise<Array<{ id: string, cli: { path: string } | null, signedIn: boolean | null, account?: object | null, problem?: string, install: string | null, setupRequired: string | null, app?: string | null, installer?: string | null }>>,
  *   localAgent?: (id: string, options?: { fresh?: boolean }) => Promise<{ id: string, cli: { path: string } | null, signedIn: boolean | null, account?: object | null, problem?: string, install: string | null, setupRequired: string | null, app?: string | null, installer?: string | null }>,
  *   openSignIn: (id: string) => Promise<{ ok: boolean, error?: string, isOpen?: () => Promise<boolean | null> }>,
  *   signOut?: (id: string) => Promise<{ ok: boolean, error?: string }>,
  *   openInstaller?: (id: string) => Promise<{ ok: boolean, error?: string }>,
  *   usePaths?: (paths: Record<string, string>) => void,
- *   pickProgram?: (id: string, words?: { title?: string, button?: string }) => Promise<string | null>,
- *   checkProgram?: (id: string, path: string) => Promise<{ ok: boolean, error?: string, code?: string }>,
+ *   pickProgram?: (id: string, words?: { title?: string, button?: string, kind?: 'file' | 'folder' }) => Promise<string | null>,
+ *   checkProgram?: (id: string, path: string) => Promise<{ ok: boolean, error?: string, code?: string, path?: string, version?: string }>,
  *   diagnose?: (id: string) => Promise<{ found: string | null, hint: string | null, text: string } | null>,
  *   closeSessions: (id: string) => void,
+ *   resetAgent?: (id: string) => void,
  *   seal: (text: string) => Buffer, unseal: (data: Buffer) => string,
  *   onChange: (list: any[]) => void,
  *   fetch?: typeof fetch,
@@ -235,9 +237,10 @@ export function createRoster(deps) {
   let choices = readChoices(dataDir);
   deps.usePaths?.(choices.paths);
   /** what is happening now, beyond what is kept: a sign-in or an install waited for, an error to show */
-  const live = { waiting: {}, installing: {}, errors: {} };
+  const live = { waiting: {}, installing: {}, errors: {}, connectionIssues: {} };
   let local = null;
   const revision = new Map();
+  const configurationRevision = new Map();
   const checking = new Map();
   let refreshing = null;
 
@@ -258,6 +261,7 @@ export function createRoster(deps) {
   };
   /** The own models that have a key: the ones the agent can use. */
   const keyed = () => (choices.byok?.models ?? []).filter((m) => keyOf(m.id));
+  const enabled = (id) => Boolean(choices.shown[id]) && !choices.disconnected.includes(id);
 
   function stateOf(id) {
     if (isOwn(id)) {
@@ -268,7 +272,7 @@ export function createRoster(deps) {
         return { status: 'missing', install: found.install ?? null, setupRequired: found.setupRequired ?? null, app: found.app ?? null, installer: found.installer ?? null,
           ...(live.installing[id] ? { installing: true } : {}), ...where };
       }
-      if (choices.disconnected.includes(id)) return { status: 'off', ...where };
+      if (choices.disconnected.includes(id) || !choices.shown[id]) return { status: 'off', ...where };
       if (found.signedIn === false) return { status: live.waiting[id] ? 'waiting' : 'sign-in', ...where };
       return { status: 'ready', ...where, ...(found.account ? { account: { ...found.account } } : {}), ...(found.problem ? { problem: found.problem } : {}),
         ...(found.signOut && deps.signOut ? { signOut: true } : {}) };
@@ -285,6 +289,8 @@ export function createRoster(deps) {
       shown: choices.shown[id] ?? false,
       ...stateOf(id),
       ...(live.errors[id] ? { error: live.errors[id] } : {}),
+      ...(live.connectionIssues[id] ? { connectionIssue: { ...live.connectionIssues[id] } } : {}),
+      ...(configurationRevision.has(id) ? { configurationRevision: configurationRevision.get(id) } : {}),
       ...(id === 'byok' && choices.byok ? { byok: { models: choices.byok.models.map((m) => ({ ...m, levels: [...m.levels] })) } } : {}),
     }));
   }
@@ -292,7 +298,7 @@ export function createRoster(deps) {
   const changed = () => deps.onChange(list());
   const save = (next) => { choices = next; writeChoices(dataDir, choices); changed(); };
 
-  async function refresh() {
+  async function refresh({ fresh = false, only = null } = {}) {
     // Focus after signing in should not wait for every other agent to finish its own status command. Only the agent
     // being signed in is asked fresh; the others keep their cached answers in the full scan.
     if (deps.localAgent) {
@@ -301,21 +307,47 @@ export function createRoster(deps) {
         void lookAgain(id, () => !choices.disconnected.includes(id) && live.waiting[id] === waiting && !waiting.signal.aborted);
       }
     }
-    if (!refreshing) {
+    if (!refreshing || fresh || only) {
       const started = new Map(revision);
-      refreshing = (async () => {
-        const found = await deps.localAgents().catch(() => null);
+      const ids = (only ?? [...OWN_AGENT_IDS]).filter(isOwn).sort((a, b) => Number(enabled(b)) - Number(enabled(a)));
+      const statusIds = ids.filter((id) => enabled(id) || live.waiting[id] || live.installing[id] || Boolean(only));
+      const wanted = new Set(ids);
+      const accept = (agent) => {
+        if (!wanted.has(agent.id) || revision.get(agent.id) !== started.get(agent.id)) return;
+        local = [...(local ?? []).filter((a) => a.id !== agent.id), agent];
+        changed();
+      };
+      const pending = (async () => {
+        const found = await deps.localAgents({ ids, statusIds, fresh, onAgent: accept }).catch(() => null);
         if (found) {
-          const current = local ?? [];
-          // A full scan started before a fresh sign-in check must not overwrite its newer result.
-          local = found.map((a) => revision.get(a.id) !== started.get(a.id) ? current.find((v) => v.id === a.id) ?? a : a);
-          local.push(...current.filter((a) => revision.get(a.id) !== started.get(a.id) && !found.some((v) => v.id === a.id)));
+          local ??= [];
+          for (const agent of found) {
+            // A late result cannot overwrite a newer sign-in or re-enable an agent switched off during the scan.
+            if (revision.get(agent.id) !== started.get(agent.id)) continue;
+            local = [...local.filter((a) => a.id !== agent.id), agent];
+          }
         } else local ??= [];
         changed();
         return list();
-      })().finally(() => { refreshing = null; });
+      })().finally(() => { if (refreshing === pending) refreshing = null; });
+      refreshing = pending;
     }
     return refreshing;
+  }
+
+  /** Re-read settings after an external configuration change; idle sessions and model menus are renewed. */
+  async function recheck(id) {
+    if (id != null && !isOwn(id)) return list();
+    for (const target of id ? [id] : OWN_AGENT_IDS) {
+      revision.set(target, (revision.get(target) ?? 0) + 1);
+      configurationRevision.set(target, (configurationRevision.get(target) ?? 0) + 1);
+      checking.delete(target);
+      delete live.errors[target];
+      delete live.connectionIssues[target];
+      deps.resetAgent?.(target);
+    }
+    changed();
+    return refresh({ fresh: true, only: id ? [id] : null });
   }
 
   /** The one agent signed in to, asked again: alone when it can be, not every agent every few seconds. */
@@ -384,18 +416,36 @@ export function createRoster(deps) {
   return {
     list,
     refresh,
+    recheck,
     cancelSignIn,
+
+    /** An actual model request failed or succeeded. Refreshing discovery does not erase a model failure. */
+    recordConnectionResult(id, error) {
+      if (!isOwn(id)) return;
+      if (error == null) delete live.connectionIssues[id];
+      else {
+        const issue = agentConnectionIssue(error);
+        if (!issue) return;
+        live.connectionIssues[id] = issue;
+      }
+      changed();
+    },
 
     /** Connect: back on here; its own sign-in when it needs one. */
     async connect(id) {
       if (!isAgentId(id)) return { ok: false, error: `No agent ${id}` };
       delete live.errors[id];
+      const wasDisconnected = choices.disconnected.includes(id);
       /* connecting one is choosing it: it is shown in the chat (and among the person's agents in Settings) */
       save({ ...choices, shown: { ...choices.shown, [id]: true }, disconnected: choices.disconnected.filter((a) => a !== id) });
       try {
         if (isOwn(id)) {
           deps.closeSessions(id);
-          const [now] = (await refresh()).filter((a) => a.id === id);
+          // A known sign-in wait can be restarted immediately, even if its previous status probe is still pending.
+          if (deps.localAgent) {
+            if (wasDisconnected || !local?.some((a) => a.id === id && a.signedIn === false)) await lookAgain(id, () => enabled(id));
+          } else await refresh();
+          const now = list().find((a) => a.id === id);
           /* signed out; or signing in already, its window closed before it was done (Start again): opened again */
           if (now?.status !== 'sign-in' && now?.status !== 'waiting') return { ok: true };
           const opened = await deps.openSignIn(id);
@@ -403,7 +453,7 @@ export function createRoster(deps) {
           void waitForSignIn(id, opened.isOpen);
           return { ok: true };
         }
-        await refresh();
+        changed();
         return { ok: true };
       } catch (e) {
         live.errors[id] = e instanceof Error ? e.message : String(e);
@@ -424,6 +474,7 @@ export function createRoster(deps) {
       deps.closeSessions(id);
       const out = await deps.signOut(id).catch((e) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
       if (!out.ok) { live.errors[id] = out.error || `${AGENT_NAMES[id]} did not sign out.`; changed(); return { ok: false, error: live.errors[id] }; }
+      delete live.connectionIssues[id];
       /* signed out now: said at once, and kept over an older answer still on its way */
       local = (local ?? []).map((a) => (a.id === id ? { ...a, signedIn: false, account: null } : a));
       revision.set(id, (revision.get(id) ?? 0) + 1);
@@ -454,12 +505,14 @@ export function createRoster(deps) {
       const checked = await deps.checkProgram(id, path);
       if (!checked.ok) return { ok: false, error: checked.error ?? '', ...(checked.code ? { code: checked.code } : {}) };
       delete live.errors[id];
+      delete live.connectionIssues[id];
       deps.closeSessions(id);
       choices = { ...choices, paths: { ...choices.paths, [id]: path }, shown: { ...choices.shown, [id]: true } };
       deps.usePaths?.(choices.paths);
       save(choices);
-      await refresh();
-      return { ok: true };
+      if (deps.localAgent) await lookAgain(id, () => true);
+      else await refresh();
+      return { ok: true, ...(checked.path ? { path: checked.path } : {}), ...(checked.version ? { version: checked.version } : {}) };
     },
 
     /**
@@ -479,11 +532,13 @@ export function createRoster(deps) {
     async useAutomatic(id) {
       if (!Object.hasOwn(choices.paths, id)) return { ok: true };
       const { [id]: _gone, ...paths } = choices.paths;
+      delete live.connectionIssues[id];
       deps.closeSessions(id);
       choices = { ...choices, paths };
       deps.usePaths?.(choices.paths);
       save(choices);
-      await refresh();
+      if (deps.localAgent) await lookAgain(id, () => true);
+      else await refresh();
       return { ok: true };
     },
 
@@ -491,13 +546,16 @@ export function createRoster(deps) {
     async diagnose(id) {
       if (!isOwn(id) || !deps.diagnose) return null;
       const report = await deps.diagnose(id);
-      void refresh();
+      if (deps.localAgent) await lookAgain(id, () => true);
+      else void refresh();
       return report;
     },
 
     setShown(id, shown) {
       if (!isAgentId(id)) return;
+      revision.set(id, (revision.get(id) ?? 0) + 1);
       save({ ...choices, shown: { ...choices.shown, [id]: shown === true } });
+      if (shown && enabled(id) && deps.localAgent) void lookAgain(id, () => enabled(id));
     },
 
     /**

@@ -351,6 +351,7 @@ export async function diagnoseAgent(id, { appVersion = '' } = {}) {
     `PATH from: ${lastPathSource() ?? 'unknown'}`,
     `Chosen: ${chosen ?? '(none)'}`,
     `Found: ${found ? `${found.path} (${found.source})` : '(not found)'}`,
+    `Desktop app: ${desktopApp(id) ?? '(not found)'}`,
     ...(windows ? [
       `npm global folder: ${slow.npmPrefix ?? '(unknown)'}`,
       ...(id === 'codex' ? [`Codex the Codex app starts: ${codexAppCopies()[0] ?? '(none)'}`] : []),
@@ -424,6 +425,8 @@ export function readAgentStatus(id, stdout, out) {
  * is learnt anyway, from a message refused for it (noteSignedOut) or when the person signs in from Settings.
  */
 const asked = new Map();
+/** Explicit settings refresh: the next sign-in/options check must read the current configuration. */
+export function forgetAgentStatus(id) { asked.delete(id); }
 const ASKED_FOR_MS = 15_000;
 const SIGNED_IN_FOR_MS = 10 * 60_000;
 
@@ -681,29 +684,39 @@ export async function openAgentInstaller(id) {
  * here but has not downloaded Claude Code yet (opening its Code tab does). One not found: `app`, the maker's desktop
  * app when it is here without the agent's program; `installer`, the official command that installs it, when it has one.
  */
-export async function listAgents() {
+export async function listAgents({ ids = Object.keys(AGENTS), statusIds = ids, fresh = false, onAgent = () => {} } = {}) {
+  const wanted = [...new Set(ids)].filter((id) => Object.hasOwn(AGENTS, id));
+  if (!wanted.length) return [];
   /* looked at as the person comes back from installing one: a PATH from a few seconds ago at most */
-  const pathDirs = (await loginShellEnvironment({ maxAgeMs: 10_000 })).PATH.split(PATH_SEP);
+  const pathDirs = (await loginShellEnvironment({ maxAgeMs: fresh ? 0 : 10_000 })).PATH.split(PATH_SEP);
   /* the slower search (Windows): waited for, a few seconds at most, when one is not found the quick way. What it finds
      later is there on the next look */
-  if (windows) {
-    const slow = windowsSlowSearch();
-    if (Object.keys(AGENTS).some((id) => !resolveAgentCli(id, { pathDirs }))) {
-      await Promise.race([slow, new Promise((done) => setTimeout(done, 3000).unref?.())]);
+  return Promise.all(wanted.map(async (id) => {
+    const checkSignIn = statusIds.includes(id);
+    // Enabled agents start first. Background discovery never opens a disabled agent's ACP/auth session.
+    if (!checkSignIn) await new Promise((done) => setImmediate(done));
+    if (windows && !resolveAgentCli(id, { pathDirs })) {
+      await Promise.race([windowsSlowSearch(), new Promise((done) => setTimeout(done, 3000).unref?.())]);
     }
-  }
-  return Promise.all(Object.keys(AGENTS).map((id) => agentOnComputer(id, pathDirs)));
+    const agent = await agentOnComputer(id, pathDirs, { fresh, checkSignIn });
+    onAgent(agent);
+    return agent;
+  }));
 }
 
-/** One agent as listAgents has it, asked alone: while the person signs in to it, only it is asked again. */
+/** One agent as listAgents has it, asked alone when connecting, diagnosing or waiting for sign-in. */
 export async function localAgent(id, { fresh = false } = {}) {
   if (!isAgentId(id)) throw new Error(`No agent ${id}`);
-  return agentOnComputer(id, (await loginShellEnvironment({ maxAgeMs: 10_000 })).PATH.split(PATH_SEP), { fresh });
+  const pathDirs = (await loginShellEnvironment({ maxAgeMs: 10_000 })).PATH.split(PATH_SEP);
+  if (windows && !resolveAgentCli(id, { pathDirs })) {
+    await Promise.race([windowsSlowSearch(), new Promise((done) => setTimeout(done, 3000).unref?.())]);
+  }
+  return agentOnComputer(id, pathDirs, { fresh });
 }
 
-async function agentOnComputer(id, pathDirs, { fresh = false } = {}) {
+async function agentOnComputer(id, pathDirs, { fresh = false, checkSignIn = true } = {}) {
   const cli = resolveAgentCli(id, { pathDirs });
-  const { install } = detectAgentInstallation(id);
+  const install = AGENT_DEFINITIONS[id]?.install ?? null;
   const app = cli ? null : desktopApp(id);
   const claudeApp = id === 'claude' && Boolean(app);
   return {
@@ -711,7 +724,7 @@ async function agentOnComputer(id, pathDirs, { fresh = false } = {}) {
     label: AGENTS[id].label,
     cli: cli ? { path: cli.path, source: cli.source } : null,
     chosen: chosenPaths[id] ?? null,
-    ...(cli ? ownSignIn(AGENTS[id], await agentStatus(id, cli.path, { fresh })) : { signedIn: null, account: null }),
+    ...(cli && checkSignIn ? ownSignIn(AGENTS[id], await agentStatus(id, cli.path, { fresh })) : { signedIn: null, account: null }),
     /* it signs out with its own command: Switch account signs in to another account from Settings */
     ...(cli && AGENTS[id].logout ? { signOut: true } : {}),
     install,

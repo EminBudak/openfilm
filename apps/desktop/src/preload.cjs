@@ -45,6 +45,7 @@ contextBridge.exposeInMainWorld('openfilmNative', {
   /* the roster (agent-roster.mjs): Settings → Agents and the chat's menu */
   agents: {
     list: () => ipcRenderer.invoke('desktop:agents:list'),
+    refresh: () => ipcRenderer.invoke('desktop:agents:refresh'),
     connect: (id) => ipcRenderer.invoke('desktop:agents:connect', { id }),
     cancelSignIn: (id) => ipcRenderer.invoke('desktop:agents:cancel-sign-in', { id }),
     disconnect: (id) => ipcRenderer.invoke('desktop:agents:disconnect', { id }),
@@ -56,6 +57,7 @@ contextBridge.exposeInMainWorld('openfilmNative', {
     useAutomatic: (id) => ipcRenderer.invoke('desktop:agents:automatic', { id }),
     install: (id) => ipcRenderer.invoke('desktop:agents:install', { id }),
     diagnose: (id) => ipcRenderer.invoke('desktop:agents:diagnose', { id }),
+    openSetup: (id) => ipcRenderer.invoke('desktop:agents:setup', { id }),
     report: () => ipcRenderer.invoke('desktop:agents:report'),
     /* the whole diagnostic report on the clipboard (main.mjs): the chat's, by a turn that failed */
     copyReport: () => ipcRenderer.invoke('desktop:diagnostics:copy'),

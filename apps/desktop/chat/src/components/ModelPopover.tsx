@@ -104,13 +104,14 @@ export function ModelPopover({ placement = 'bottom', align = 'start', agent: con
   const agent = conversationAgent ?? currentAgent(la);
   const shown = shownAgents(la.roster);
   const ready = (id: LocalAgentId) => shown.find((a) => a.id === id)?.status === 'ready';
-  React.useEffect(() => { if (ready(agent)) void ensureOptions(agent); });
+  const selectedReady = ready(agent);
+  const configurationRevision = la.roster?.find((a) => a.id === agent)?.configurationRevision;
+  React.useEffect(() => { if (selectedReady) void ensureOptions(agent); }, [agent, selectedReady, configurationRevision, ensureOptions]);
   React.useEffect(() => {
     if (!open) return;
-    void refresh().then(() => {
-      for (const a of shownAgents(useLocalAgents.getState().roster)) if (a.status === 'ready') void ensureOptions(a.id, { retry: true });
-    });
-  }, [open, refresh, ensureOptions]);
+    void refresh();
+    if (useLocalAgents.getState().roster?.some((a) => a.id === agent && a.shown && a.status === 'ready')) void ensureOptions(agent, { retry: true });
+  }, [open, agent, refresh, ensureOptions]);
 
   const picked = conversationPrefs ?? la.prefs;
   const options = agentOptions({ ...la, prefs: picked }, agent);

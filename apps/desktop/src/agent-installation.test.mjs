@@ -202,7 +202,7 @@ test('the report: every folder searched, each file with the name, what a shim ru
   put(join(npm, 'qwen.cmd'), npmShim('node_modules\\@qwen-code\\qwen-code\\cli.js'));
   put(join(npm, 'qwen.ps1'), '');
   const report = searchReport('qwen', { home, env: { PATH: `${npm};${npm.toUpperCase()}` }, pathDirs: [join(home, 'other')], win: true });
-  const own = join(process.env.LOCALAPPDATA || join(home, 'AppData', 'Local'), 'qwen-code', 'bin');
+  const own = join(home, 'AppData', 'Local', 'qwen-code', 'bin');
   assert.deepEqual(report.searched, [npm, join(home, 'other'), own], 'each folder once, whatever its case, its own installer\'s last');
   assert.deepEqual(report.files, [
     { file: join(npm, 'qwen'), runs: join(npm, 'qwen'), usable: false },
@@ -384,7 +384,6 @@ test("DeepSeek Harness's Windows shim runs a script inside its app's archive on 
 });
 
 test("Cursor's agent on Windows: found in %LOCALAPPDATA%\\cursor-agent, started by its own shim, which runs its own Node", () => {
-  if (process.platform === 'win32') return;
   const home = mkdtempSync(join(tmpdir(), 'of-home-'));
   const root = join(home, 'AppData', 'Local', 'cursor-agent');
   put(join(root, 'versions', '2026.10.16-e3cb207', 'index.js'));
@@ -395,7 +394,6 @@ test("Cursor's agent on Windows: found in %LOCALAPPDATA%\\cursor-agent, started 
 });
 
 test('Claude Code in the Claude app on Windows: under %APPDATA%\\Claude, or the Store app\'s own copy of it; the newest', () => {
-  if (process.platform === 'win32') return;
   const home = mkdtempSync(join(tmpdir(), 'of-home-'));
   assert.equal(claudeAppCli(home, { win: true }), null);
   const roaming = put(join(home, 'AppData', 'Roaming', 'Claude', 'claude-code', '2.1.290', 'claude.exe'));
@@ -441,8 +439,9 @@ test("the maker's desktop app is told without its agent: by its bundle on a Mac,
   assert.equal(desktopApp('copilot', mac), null, 'VS Code without the Copilot extension');
   mkdirSync(join(home, '.vscode', 'extensions', 'github.copilot-chat-0.30.0'), { recursive: true });
   assert.equal(desktopApp('copilot', mac), 'VS Code');
+  mkdirSync(join(apps, 'GitHub Copilot.app'));
+  assert.equal(desktopApp('copilot', mac), 'GitHub Copilot');
   assert.equal(desktopApp('qwen', mac), null, 'no desktop app');
-  if (process.platform === 'win32') return;
   const win = { home, applicationDirs: [], win: true };
   assert.equal(desktopApp('minimax', win), null);
   mkdirSync(join(home, 'AppData', 'Local', 'Programs', 'MiniMax Agent'), { recursive: true });
@@ -473,8 +472,135 @@ test('the report says which file is not the agent, and why', () => {
   assert.equal(report.files[0].usable, false);
 });
 
+test('choosing an installation folder finds standalone connection programs at its root or in bin', () => {
+  const home = mkdtempSync(join(tmpdir(), 'of-install-folders-'));
+  for (const name of ['codex', 'claude', 'qwen', 'kimi', 'mcode', 'codebuddy']) {
+    for (const subdir of ['', 'bin']) {
+      const folder = join(home, `${name}-${subdir || 'root'}`);
+      const cli = put(join(folder, subdir, `${name}.exe`), peProgram(3));
+      assert.equal(chosenProgram(folder, { home, names: [name], win: true }), cli);
+    }
+  }
+  assert.equal(chosenProgram(home, { home, names: ['copilot'], win: true }), null, 'an unrelated folder does not silently choose another installation');
+});
+
+test('OpenCode Desktop on Windows: the packaged CLI and its newer running copy, without a PATH entry', () => {
+  const home = mkdtempSync(join(tmpdir(), 'of-opencode-win-'));
+  const root = join(home, 'apps', 'OpenCode');
+  const gui = put(join(root, 'OpenCode.exe'), peProgram(2));
+  const packaged = put(join(root, 'resources', 'opencode-cli.exe'), peProgram(3));
+  put(join(root, 'resources', 'opencode-cli.version'), '2.1.4\n');
+  assert.equal(opencodeVersion(packaged, { ask: () => assert.fail('read the packaged version') }), '2.1.4');
+  const opts = { home, env: { PATH: '' }, pathDirs: [], applicationDirs: [], win: true,
+    windowsApps: [{ name: 'OpenCode 2.1.4', directories: [root] }] };
+  assert.equal(detectAgentInstallation('opencode', opts).cli, packaged);
+  const report = searchReport('opencode', opts);
+  assert.ok(report.searched.includes(join(root, 'resources')));
+  assert.ok(report.files.some((entry) => entry.file === packaged && entry.usable), 'diagnostics include the same bundled runtime as discovery');
+  assert.equal(chosenProgram(root, { names: ['opencode'], win: true }), packaged);
+  assert.equal(chosenProgram(gui, { names: ['opencode'], win: true }), packaged);
+  const running = put(join(home, 'AppData', 'Roaming', 'ai.opencode.desktop', 'cli', '2.1.5-x64', 'opencode-cli.exe'), peProgram(3));
+  put(`${running}.version`, '2.1.5');
+  assert.equal(detectAgentInstallation('opencode', opts).cli, running, 'the newer app-managed copy');
+  assert.equal(detectAgentInstallation('opencode', { ...opts, chosen: gui }).cli, packaged, 'the explicit choice wins');
+  const mine = put(join(home, 'bin', 'opencode.exe'), peProgram(3));
+  put(`${mine}.version`, '2.1.6');
+  assert.equal(detectAgentInstallation('opencode', { ...opts, env: { PATH: join(home, 'bin') } }).cli, mine, 'a newer independent CLI stays');
+});
+
+test('GitHub Copilot Desktop on Windows: its SDK CLI is found, but GUI programs and incomplete copies are not', () => {
+  const home = mkdtempSync(join(tmpdir(), 'of-copilot-win-'));
+  const root = join(home, 'AppData', 'Local', 'github-copilot-sdk');
+  const opts = { home, env: { PATH: '' }, pathDirs: [], applicationDirs: [], windowsApps: [], win: true };
+  mkdirSync(join(root, 'cli', 'copilot-sdk-runtime-1.0.100'), { recursive: true });
+  assert.equal(detectAgentInstallation('copilot', opts).cli, null, 'a cache directory alone is not installed');
+  const older = put(join(root, 'cli', 'copilot-sdk-runtime-1.0.100', 'copilot.exe'), peProgram(3));
+  put(`${older}.version`, '1.0.100');
+  const newer = put(join(root, 'runtime', 'copilot-sdk-runtime-1.0.102', 'copilot.exe'), peProgram(3));
+  put(`${newer}.version`, '1.0.102');
+  put(join(root, 'cli', 'copilot-sdk-runtime-9.0.0', 'copilot.exe'), peProgram(2));
+  const found = detectAgentInstallation('copilot', opts);
+  assert.equal(found.cli, newer);
+  assert.equal(found.source, 'app');
+  const app = join(home, 'custom apps', 'GitHub Copilot');
+  const gui = put(join(app, 'github.exe'), peProgram(2));
+  put(join(app, 'copilot-sdk', 'index.js'));
+  assert.equal(chosenProgram(gui, { home, names: ['copilot'], win: true }), newer);
+  assert.equal(chosenProgram(app, { home, names: ['copilot'], win: true }), newer);
+  assert.equal(detectAgentInstallation('copilot', { ...opts, chosen: gui }).cli, newer);
+  const chosen = put(join(home, 'bin', 'copilot.exe'), peProgram(3));
+  put(`${chosen}.version`, '2.0.0');
+  assert.equal(detectAgentInstallation('copilot', { ...opts, env: { PATH: join(home, 'bin') } }).cli, chosen);
+});
+
+test('custom Windows app registrations identify the desktop app without making its GUI an agent', () => {
+  const home = mkdtempSync(join(tmpdir(), 'of-custom-apps-'));
+  const opts = { home, applicationDirs: [], win: true, windowsApps: [] };
+  for (const [id, name, label] of [
+    ['cursor', 'Cursor (User)', 'Cursor'], ['codebuddy', 'CodeBuddy CN (User)', 'CodeBuddy'],
+    ['copilot', 'GitHub Copilot', 'GitHub Copilot'], ['kimi', 'Kimi Code', 'Kimi'],
+    ['minimax', 'MiniMax Code', 'MiniMax'], ['deepseek', 'DeepSeek Harness 0.2.1-rc.3', 'DeepSeek Harness'],
+  ]) {
+    const dir = join(home, 'custom apps', id);
+    assert.equal(desktopApp(id, { ...opts, windowsApps: [{ name, directories: [dir] }] }), null, 'stale registration');
+    mkdirSync(dir, { recursive: true });
+    const windowsApps = [{ name, directories: [dir] }];
+    assert.equal(desktopApp(id, { ...opts, windowsApps }), label);
+    assert.equal(detectAgentInstallation(id, { ...opts, windowsApps, env: { PATH: '' }, pathDirs: [] }).cli, null);
+  }
+});
+
+test('DeepSeek Harness in a custom Windows folder: automatic discovery and choosing the app both retain its own shim', () => {
+  const home = mkdtempSync(join(tmpdir(), 'of-dsh-custom-'));
+  const root = join(home, 'custom apps', 'DeepSeek Harness');
+  const gui = put(join(root, 'DeepSeek Harness.exe'), peProgram(2));
+  const shim = put(join(root, 'resources', 'runtime', 'cli', 'bin', 'dsh.cmd'), '@echo off\r\nset "ELECTRON_RUN_AS_NODE=1"\r\n"%~dp0..\\..\\..\\..\\DeepSeek Harness.exe" "%~dp0..\\..\\..\\app.asar\\dsh\\cli.js" %*\r\n');
+  const opts = { home, env: { PATH: '' }, pathDirs: [], applicationDirs: [], win: true,
+    windowsApps: [{ name: 'DeepSeek Harness 0.2.1-rc.3', directories: [root] }] };
+  assert.equal(detectAgentInstallation('deepseek', opts).cli, shim);
+  assert.equal(chosenProgram(root, { names: ['dsh'], win: true }), shim);
+  assert.equal(chosenProgram(gui, { names: ['dsh'], win: true }), shim);
+  assert.equal(detectAgentInstallation('deepseek', { ...opts, chosen: gui }).source, 'chosen');
+  assert.equal(notTheAgent('deepseek', shim, { chosen: gui, win: true }), null);
+});
+
+test('the remaining Windows CLI installers are found outside PATH without counting desktop executables', () => {
+  const home = mkdtempSync(join(tmpdir(), 'of-cli-installers-'));
+  const local = join(home, 'AppData', 'Local');
+  for (const [id, file] of [
+    ['qwen', join(local, 'qwen-code', 'bin', 'qwen.exe')],
+    ['kimi', join(home, '.kimi-code', 'bin', 'kimi.exe')],
+    ['minimax', join(home, '.minimax-code', 'bin', 'mcode.exe')],
+    ['codebuddy', join(local, 'codebuddy', 'bin', 'codebuddy.exe')],
+    ['cursor', join(local, 'cursor-agent', 'agent.exe')],
+  ]) {
+    const opts = { home, env: { PATH: '' }, pathDirs: [], applicationDirs: [], windowsApps: [], win: true };
+    put(file, peProgram(2));
+    assert.equal(detectAgentInstallation(id, opts).cli, null, `${id}: a GUI does not count`);
+    put(file, peProgram(3));
+    assert.equal(detectAgentInstallation(id, opts).cli, file, `${id}: the installer's CLI does`);
+  }
+});
+
+test('MiniMax official Windows installer keeps mcode.cmd at its install root, off PATH', () => {
+  const home = mkdtempSync(join(tmpdir(), 'of-mcode-root-'));
+  const root = join(home, '.minimax-code');
+  put(join(root, 'runtime', 'node.exe'));
+  put(join(root, 'node_modules', '@minimax-ai', 'code', 'cli.js'));
+  const shim = put(join(root, 'mcode.cmd'), '@echo off\r\n"%~dp0runtime\\node.exe" "%~dp0node_modules\\@minimax-ai\\code\\cli.js" %*\r\n');
+  assert.equal(detectAgentInstallation('minimax', { home, env: { PATH: '' }, pathDirs: [], applicationDirs: [], windowsApps: [], win: true }).cli, shim);
+});
+
+test('MiniMax npm CLI keeps its launcher so native SQLite uses the installing Node, not Electron', () => {
+  const root = mkdtempSync(join(tmpdir(), 'of-mcode-npm-'));
+  put(join(root, 'node_modules', '@minimax-ai', 'code', 'cli.js'));
+  const shim = put(join(root, 'mcode.cmd'), npmShim('node_modules\\@minimax-ai\\code\\cli.js'));
+  assert.equal(cmdTarget(shim), null);
+  assert.equal(findExecutable('mcode', [], { PATH: root }, { win: true }), shim);
+  assert.equal(chosenProgram(shim, { names: ['mcode'], win: true }), shim);
+});
+
 test("Codex on Windows: never the copy in the Store app's own folder, which Windows won't start; the copy the Codex app starts", () => {
-  if (process.platform === 'win32') return;
   const home = mkdtempSync(join(tmpdir(), 'of-home-'));
   const store = put(join(home, 'Program Files', 'WindowsApps', 'OpenAI.Codex_26.1002.7124.0_x64__2p2nqsd0c76g0', 'app', 'resources', 'codex.exe'));
   assert.equal(notTheAgent('codex', store, { win: true }), 'app');

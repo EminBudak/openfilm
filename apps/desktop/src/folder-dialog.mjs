@@ -39,7 +39,7 @@ export function programDialogOptions(options, platform = process.platform) {
     title,
     message: title,
     buttonLabel: text(o.button) ?? 'Choose',
-    ...(platform === 'win32' ? { filters: [{ name: 'Programs', extensions: ['exe', 'cmd', 'bat', 'ps1', 'js'] }, { name: 'All files', extensions: ['*'] }] } : {}),
-    properties: ['openFile', 'showHiddenFiles'],
+    ...(platform === 'win32' && o.kind !== 'folder' ? { filters: [{ name: 'Programs', extensions: ['exe', 'cmd', 'bat', 'ps1', 'js'] }, { name: 'All files', extensions: ['*'] }] } : {}),
+    properties: [o.kind === 'folder' ? 'openDirectory' : 'openFile', 'showHiddenFiles', ...(o.kind === 'folder' && platform === 'darwin' ? ['treatPackageAsDirectory'] : [])],
   };
 }

@@ -150,10 +150,10 @@ export function agentProblem(entry, step, e, turnId = null) {
  * `skills`: where the app keeps its record of skills (`dataDir`) and the person's own skills (`mine`): each session has its maker's skills and MCP servers, OpenFilm's skills, and of the person's own those let
  * in (agent-skills.mjs).
  * @param {{ trusted: (event: any) => boolean, binDir?: string | null, fallbackDir?: string | null, env?: Record<string, string>,
- *           harness?: (id: string) => Promise<any>, onWorking?: (folders: string[]) => void, onAsking?: (folders: string[]) => void, logDir?: () => string | null,
+ *           harness?: (id: string) => Promise<any>, onWorking?: (folders: string[]) => void, onAsking?: (folders: string[]) => void, onConnectionResult?: (id: string, error: unknown | null) => void, logDir?: () => string | null,
  *           skills?: { dataDir: string, mine: string } | null }} opts
  */
-export function registerLocalAgentIpc(ipcMain, { trusted, binDir = null, fallbackDir = null, env = {}, harness = async () => null, log = () => {}, onWorking = () => {}, onAsking = () => {}, logDir = () => null, skills = null }) {
+export function registerLocalAgentIpc(ipcMain, { trusted, binDir = null, fallbackDir = null, env = {}, harness = async () => null, log = () => {}, onWorking = () => {}, onAsking = () => {}, onConnectionResult = (_agent, _error) => {}, logDir = () => null, skills = null }) {
   const harnessFor = async (agent) => (HARNESS_AGENTS.includes(agent) ? harness(agent) : undefined);
   const skillRecord = skills ? skillStore(skills.dataDir) : null;
   /* what went wrong, kept in Studio's home with Studio's own problems (openfilm's problems.mjs), for its report */
@@ -243,6 +243,7 @@ export function registerLocalAgentIpc(ipcMain, { trusted, binDir = null, fallbac
       const error = e instanceof Error ? e.message : String(e);
       /* the model menu says only that it could not start: what went wrong is kept here (logs/studio.log) */
       log(`probe ${agent}: ${error.replace(/\s+/g, ' ').slice(0, 500)}\n`);
+      onConnectionResult(agent, e);
       return { ok: false, error, ...(e?.code ? { code: String(e.code) } : {}) };
     } finally {
       session?.close();
@@ -309,6 +310,7 @@ export function registerLocalAgentIpc(ipcMain, { trusted, binDir = null, fallbac
       return { ok: true, key, info: { ...info, authMethods: [], mcp: false } };
     } catch (e) {
       const result = { ok: false, error: e instanceof Error ? e.message : String(e), ...(e?.code ? { code: String(e.code) } : {}) };
+      onConnectionResult(agent, e);
       if (meta?.turnId) {
         const raw = sentError(e);
         const file = openLog(cwd, meta.turnId, (err) => log(`turn log ${meta.turnId}: ${err.message}\n`));
@@ -342,11 +344,13 @@ export function registerLocalAgentIpc(ipcMain, { trusted, binDir = null, fallbac
     entry.running = (entry.running ?? 0) + 1;
     onWorking(working());
     let result;
+    let connectionError = null;
     /* the error as the agent sent it (ACP's code, message and data), for the turn log */
     let raw = null;
     try {
       result = { ok: true, stopReason: await entry.session.prompt([{ type: 'text', text }, ...images], { turnId: meta?.turnId }) };
     } catch (e) {
+      connectionError = e;
       /* `balance`: the service the app's own agent runs on has no balance left (agents.mjs), and where to top it up */
       result = { ok: false, error: e instanceof Error ? e.message : String(e), ...(e?.balance ? { balance: e.balance } : {}) };
       raw = sentError(e);
@@ -356,6 +360,7 @@ export function registerLocalAgentIpc(ipcMain, { trusted, binDir = null, fallbac
       entry.running -= 1;
       onWorking(working());
     }
+    if (!result.ok || (result.stopReason?.stopReason !== 'cancelled' && result.stopReason !== 'cancelled')) onConnectionResult(entry.agent, connectionError);
     /* GitHub Copilot, its session naming no model (on some accounts): the one that answered, as its own record says,
        for the turn's footer */
     if (result.ok && entry.agent === 'copilot' && !entry.info?.configOptions?.some((o) => o?.category === 'model')) {

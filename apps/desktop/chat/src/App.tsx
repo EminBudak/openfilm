@@ -253,7 +253,7 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
 
   /* ── the agent ── */
   const la = useLocalAgents();
-  React.useEffect(() => { la.hydrate(); void la.refresh(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  React.useEffect(() => { la.hydrate(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   /* the agent this conversation used and its options, whatever was picked since in another one; a new conversation
      takes the one picked last (lib/conversation-agent). A conversation from before they kept it: its last turn's agent */
   const shownSessionItem = sessions.find((s) => s.id === sessionId);

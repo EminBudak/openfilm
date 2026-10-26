@@ -19,6 +19,100 @@ const roster = (dataDir, fetch, extra = {}) => createRoster({
   ...extra,
 });
 
+test('startup publishes each result before a slow background discovery ends; only enabled agents need sign-in checks', async () => {
+  const slow = Promise.withResolvers();
+  let requested;
+  const r = roster(mkdtempSync(join(tmpdir(), 'of-progressive-agents-')), undefined, {
+    localAgents: async (options) => {
+      requested = options;
+      return Promise.all(options.ids.map(async (id) => {
+        if (id === 'cursor') await slow.promise;
+        const fact = { id, cli: { path: `/bin/${id}` }, signedIn: true };
+        options.onAgent(fact);
+        return fact;
+      }));
+    },
+  });
+  const pending = r.refresh();
+  try {
+    await new Promise((done) => setImmediate(done));
+    assert.deepEqual(requested.statusIds, ['codex']);
+    assert.equal(requested.ids.length, 10, 'disabled agents are still discovered automatically');
+    assert.equal(requested.ids[0], 'codex', 'enabled agents are scheduled first');
+    assert.equal(r.list().find((a) => a.id === 'codex').status, 'ready');
+    assert.equal(r.list().find((a) => a.id === 'cursor').status, 'checking');
+  } finally { slow.resolve(); await pending; }
+  assert.equal(r.list().find((a) => a.id === 'cursor').status, 'off');
+});
+
+test('connecting one agent does not wait for a pending background scan or accept its stale result', async () => {
+  const slow = Promise.withResolvers();
+  const checked = [];
+  const r = roster(mkdtempSync(join(tmpdir(), 'of-connect-priority-')), undefined, {
+    localAgents: async ({ ids, onAgent }) => {
+      await slow.promise;
+      return ids.map((id) => { const fact = { id, cli: null, signedIn: null }; onAgent(fact); return fact; });
+    },
+    localAgent: async (id) => { checked.push(id); return { id, cli: { path: `/bin/${id}` }, signedIn: true }; },
+  });
+  const scan = r.refresh();
+  let connected = false;
+  const connect = r.connect('deepseek').then(() => { connected = true; });
+  try {
+    await new Promise((done) => setImmediate(done));
+    assert.equal(connected, true);
+    assert.deepEqual(checked, ['deepseek']);
+  } finally { slow.resolve(); await Promise.all([scan, connect]); }
+  assert.equal(r.list().find((a) => a.id === 'deepseek').status, 'ready');
+});
+
+test('explicit refresh renews configuration and clears stale model errors without signing out or closing active sessions', async () => {
+  const reset = [], closed = [], scans = [];
+  const dir = mkdtempSync(join(tmpdir(), 'of-settings-refresh-'));
+  const r = roster(dir, undefined, {
+    localAgents: async (options) => { scans.push(options); return [{ id: 'deepseek', cli: { path: '/bin/dsh' }, signedIn: null }]; },
+    resetAgent: (id) => reset.push(id), closeSessions: (id) => closed.push(id),
+  });
+  await r.connect('deepseek');
+  r.recordConnectionResult('deepseek', new Error('no API key for provider route "deepseek-official"'));
+  const before = readChoices(dir);
+  const closedBefore = closed.length;
+  await r.recheck('deepseek');
+  const agent = r.list().find((a) => a.id === 'deepseek');
+  assert.equal(agent.connectionIssue, undefined, 'the error from the previous configuration is no longer current');
+  assert.equal(agent.configurationRevision, 1);
+  assert.equal(agent.path, '/bin/dsh');
+  assert.deepEqual(scans.at(-1).ids, ['deepseek']);
+  assert.deepEqual(scans.at(-1).statusIds, ['deepseek']);
+  assert.equal(scans.at(-1).fresh, true);
+  assert.deepEqual(reset, ['deepseek']);
+  assert.equal(closed.length, closedBefore, 'refresh uses idle-session renewal, not forced session closure');
+  assert.deepEqual(readChoices(dir), before);
+});
+
+test('model failures survive discovery and reconnects without changing paths, visibility or sign-in; actual success clears them', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'of-model-issue-'));
+  const r = roster(dir, undefined, {
+    localAgents: async () => [{ id: 'opencode', cli: { path: 'C:\\Apps\\OpenCode\\resources\\opencode-cli.exe' }, signedIn: null }],
+  });
+  await r.connect('opencode');
+  const before = readChoices(dir);
+  const read = () => r.list().find((a) => a.id === 'opencode');
+  r.recordConnectionResult('opencode', new Error('Free usage limit reached.'));
+  await r.refresh();
+  await r.connect('opencode');
+  assert.equal(read().status, 'ready');
+  assert.equal(read().connectionIssue.kind, 'quota');
+  assert.equal(read().path, 'C:\\Apps\\OpenCode\\resources\\opencode-cli.exe');
+  assert.deepEqual(readChoices(dir), before);
+  r.recordConnectionResult('opencode', new Error('429 Too many requests'));
+  assert.equal(read().connectionIssue.kind, 'quota', 'an unrelated transient error does not dismiss the known issue');
+  r.recordConnectionResult('opencode', null);
+  assert.equal(read().connectionIssue, undefined);
+  r.recordConnectionResult('deepseek', new Error('no API key for provider route "deepseek-official"'));
+  assert.equal(r.list().find((a) => a.id === 'deepseek').connectionIssue.kind, 'credentials');
+});
+
 test('focus publishes a fresh login before a slow full scan and ignores the scan\'s older signed-out result', async () => {
   const qwen = (signedIn) => ({ id: 'qwen', cli: { path: '/bin/qwen' }, signedIn });
   const scan = Promise.withResolvers();
@@ -31,6 +125,7 @@ test('focus publishes a fresh login before a slow full scan and ignores the scan
     signInWait: { ms: 10_000, pollMs: 5000 },
   });
   try {
+    await r.refresh();
     await r.connect('qwen');
     await new Promise((done) => setImmediate(done));
     assert.equal(checks.length, 1, 'the first login check starts immediately, before the poll delay');
@@ -83,6 +178,7 @@ test('focus and login polling share a status check, and cancelling ignores its l
     signInWait: { ms: 10_000, pollMs: 5000 },
   });
   try {
+    await r.refresh();
     await r.connect('qwen');
     await Promise.all([r.refresh(), r.refresh(), r.refresh()]);
     assert.equal(checks, 1);
@@ -300,7 +396,7 @@ test("Codex and Claude Code are shown in the chat from the start, the person's o
   const list = await r.refresh();
   const of = (id) => list.find((a) => a.id === id);
   assert.equal(of('codex').shown, true, 'not installed, still shown');
-  assert.equal(of('qwen').status, 'ready');
+  assert.equal(of('qwen').status, 'off');
   assert.equal(of('qwen').shown, false, 'installed, not chosen yet');
   assert.equal(of('kimi').status, 'missing');
   await r.connect('qwen');
@@ -331,7 +427,7 @@ test('an agent not found can be pointed at: the program is tried first, kept, an
   assert.deepEqual(readChoices(dir).paths, {}, 'a program that does not start is not kept');
   picked = 'C:\\tools\\codex.exe';
   check = { ok: true, version: 'codex-cli 1.0.0' };
-  assert.deepEqual(await r.locate('codex'), { ok: true });
+  assert.deepEqual(await r.locate('codex'), { ok: true, version: 'codex-cli 1.0.0' });
   assert.deepEqual(readChoices(dir).paths, { codex: 'C:\\tools\\codex.exe' });
   assert.deepEqual(used.at(-1), { codex: 'C:\\tools\\codex.exe' });
   assert.equal(r.list().find((a) => a.id === 'codex').chosen, 'C:\\tools\\codex.exe');
@@ -530,6 +626,7 @@ test('closing the login terminal restores sign-in even while an authentication p
   });
   const status = () => r.list().find((a) => a.id === 'qwen').status;
   try {
+    await r.refresh();
     await r.connect('qwen');
     await started.promise;
     assert.equal(status(), 'waiting');
@@ -556,6 +653,7 @@ test('cancelling sign-in restores the login state without disconnecting or waiti
     localAgent: async () => { started.resolve(); return pending.promise; },
     signInWait: { ms: 2000, pollMs: 5 },
   });
+  await r.refresh();
   await r.connect('qwen');
   await started.promise;
   r.cancelSignIn('qwen');
@@ -617,7 +715,7 @@ test("an agent found only as its maker's app: the app said, and its installer ru
   installed = true;
   await new Promise((done) => setTimeout(done, 60));
   const after = r.list().find((a) => a.id === 'cursor');
-  assert.equal(after.status, 'sign-in');
+  assert.equal(after.status, 'off', 'installation is detected without enabling or signing in to a disabled agent');
   assert.equal(after.installing, undefined);
   assert.deepEqual(await r.install('byok'), { ok: false, error: 'No agent byok' });
 

@@ -8,9 +8,10 @@
 import { execFileSync } from 'node:child_process';
 import { accessSync, closeSync, constants, lstatSync, openSync, readFileSync, readSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { delimiter, dirname, isAbsolute, join } from 'node:path';
+import { basename, delimiter, dirname, isAbsolute, join } from 'node:path';
 
 import { AGENT_DEFINITIONS, OWN_AGENT_IDS } from './agent-definitions.mjs';
+import { installedWindowsApps } from './windows-apps.mjs';
 export const AGENT_DOWNLOADS = Object.freeze(Object.fromEntries(OWN_AGENT_IDS.map((id) => [id, AGENT_DEFINITIONS[id].install])));
 
 /**
@@ -33,7 +34,7 @@ export const AGENT_PROGRAMS = Object.freeze({
   /* Kimi Code's own installer keeps it in ~/.kimi-code/bin; kimi-cli (uv) puts it in ~/.local/bin */
   kimi: { names: ['kimi'], dirs: (home) => [join(home, '.kimi-code', 'bin')] },
   /* MiniMax Code's own installer keeps it in ~/.minimax-code/bin */
-  minimax: { names: ['mcode'], dirs: (home) => [join(home, '.minimax-code', 'bin')] },
+  minimax: { names: ['mcode'], dirs: (home, win) => [...(win ? [join(home, '.minimax-code')] : []), join(home, '.minimax-code', 'bin')] },
   /* DeepSeek Harness's desktop app carries the command (its own setting only links it into the PATH): inside
      DeepSeek Harness.app on a Mac, in its install folder's resources on Windows */
   deepseek: { names: ['dsh'], dirs: (home, win, apps = ['/Applications', join(home, 'Applications')]) => (win
@@ -45,7 +46,8 @@ export const AGENT_PROGRAMS = Object.freeze({
 const DSH_IN_APP = 'Contents/Resources/runtime/cli/bin/dsh';
 
 /** %LOCALAPPDATA% (Windows). */
-const localAppData = (home) => process.env.LOCALAPPDATA || join(home, 'AppData', 'Local');
+const localAppData = (home) => (home === homedir() && process.env.LOCALAPPDATA) || join(home, 'AppData', 'Local');
+const roamingAppData = (home) => (home === homedir() && process.env.APPDATA) || join(home, 'AppData', 'Roaming');
 
 /**
  * Whether a program is in Cursor's own folder (…/cursor-agent/…, or Homebrew's cursor-cli), followed through its link.
@@ -156,7 +158,7 @@ export function claudeAppCli(home = homedir(), { win = windows } = {}) {
 /** Where the Claude app keeps Claude Code's versions. */
 function claudeAppRoots(home, win) {
   if (!win) return [join(home, 'Library/Application Support/Claude/claude-code')];
-  const appData = process.env.APPDATA || join(home, 'AppData', 'Roaming');
+  const appData = roamingAppData(home);
   const packages = join(localAppData(home), 'Packages');
   let store = [];
   try { store = readdirSync(packages).filter((d) => /^Claude_/i.test(d)).map((d) => join(packages, d, 'LocalCache', 'Roaming', 'Claude', 'claude-code')); } catch { /* none */ }
@@ -213,10 +215,12 @@ function programVersion(file, { ours, ask }) {
   }
   const named = real.split(/[\\/]/).reverse().find((part) => /^\d+\.\d+\.\d+$/.test(part));
   if (named) return named;
-  try {
-    const beside = readFileSync(`${real}.version`, 'utf8').trim();
-    if (/^\d+\.\d+\.\d+$/.test(beside)) return beside;
-  } catch { /* none */ }
+  for (const file of new Set([`${real}.version`, `${real.replace(/\.exe$/i, '')}.version`])) {
+    try {
+      const beside = readFileSync(file, 'utf8').trim();
+      if (/^\d+\.\d+\.\d+$/.test(beside)) return beside;
+    } catch { /* none */ }
+  }
   let key;
   try { key = `${real}\0${statSync(real).mtimeMs}`; } catch { return null; }
   if (!versionsAsked.has(key)) versionsAsked.set(key, ask(real));
@@ -240,6 +244,11 @@ export function codexVersion(file, { ask = askVersion } = {}) {
  */
 export function opencodeVersion(file, { ask = askVersion } = {}) {
   return programVersion(file, { ours: (name) => name === 'opencode-ai' || name.startsWith('opencode-'), ask });
+}
+
+/** The desktop SDK's Copilot CLI, or a standalone npm installation. */
+export function copilotVersion(file, { ask = askVersion } = {}) {
+  return programVersion(file, { ours: (name) => name === '@github/copilot', ask });
 }
 
 /** Whether version `a` is later than `b` (dotted numbers); false when either is unknown. */
@@ -346,6 +355,8 @@ export function cmdTarget(cmd, depth = 0) {
       if (next) return next;
       continue;
     }
+    // MiniMax's SQLite is built for the installer's Node, which can differ from Electron's module ABI.
+    if (/[\\/]@minimax-ai[\\/]code[\\/]/i.test(target) && existsFile(target)) return null;
     if (/[\\/]@openai[\\/]codex[\\/]/i.test(target) && /\.js$/i.test(target)) {
       const triple = process.arch === 'arm64' ? 'aarch64-pc-windows-msvc' : 'x86_64-pc-windows-msvc';
       const pkg = target.replace(/[\\/]bin[\\/][^\\/]+$/, '');
@@ -398,14 +409,78 @@ function opencodeInApps(/** @type {string[]} */ applicationDirs) {
   return applicationDirs.map((dir) => join(dir, 'OpenCode.app', OPENCODE_IN_APP)).filter(executableFile);
 }
 
+const WINDOWS_APP_NAMES = {
+  codex: /^(?:OpenAI\s+)?Codex(?:\s|$)/i,
+  claude: /^Claude(?:\s|$)/i,
+  copilot: /^GitHub Copilot(?:\s|$)/i,
+  cursor: /^Cursor(?:\s|$)/i,
+  opencode: /^OpenCode(?:\s|$)/i,
+  codebuddy: /^CodeBuddy(?:\s|$)/i,
+  kimi: /^Kimi(?:\s|$)/i,
+  minimax: /^MiniMax(?:\s|$)/i,
+  deepseek: /^DeepSeek Harness(?:\s|$)/i,
+};
+const WINDOWS_APP_FOLDERS = {
+  copilot: /^GitHub Copilot$/i, cursor: /^cursor$/i, opencode: /^(?:@opencodedesktop|OpenCode)$/i,
+  codebuddy: /^CodeBuddy/i, kimi: /^Kimi/i, minimax: /^MiniMax/i, deepseek: /^DeepSeek Harness$/i,
+};
+const directoryExists = (dir) => { try { return statSync(dir).isDirectory(); } catch { return false; } };
+/** Registered custom folders and the maker's default folders. Stale registry entries never count. */
+function windowsAppDirs(id, home, apps) {
+  const entries = apps ?? (process.platform === 'win32' && home === homedir() ? installedWindowsApps() : []);
+  return unique([
+    ...entries.filter((app) => WINDOWS_APP_NAMES[id]?.test(app.name)).flatMap((app) => app.directories),
+    ...(WINDOWS_APP_FOLDERS[id] ? folders(join(localAppData(home), 'Programs'), WINDOWS_APP_FOLDERS[id]) : []),
+  ], true).filter(directoryExists);
+}
+/** App-managed runtimes use one directory per version. Only real console programs count. */
+function versionedPrograms(root, name) {
+  return [...folders(root, /./).sort((a, b) => b.localeCompare(a, undefined, { numeric: true })).map((dir) => join(dir, name)), join(root, name)]
+    .filter((file) => presentFile(file) && !notTheAgent('', file, { win: true }));
+}
+/** Windows OpenCode Desktop's packaged CLI and the running copy it keeps outside its installation folder. */
+export function opencodeAppCopies(home = homedir(), { windowsApps } = {}) {
+  return [...windowsAppDirs('opencode', home, windowsApps).map((dir) => join(dir, 'resources', 'opencode-cli.exe')),
+    ...versionedPrograms(join(roamingAppData(home), 'ai.opencode.desktop', 'cli'), 'opencode-cli.exe')]
+    .filter((file) => presentFile(file) && !notTheAgent('opencode', file, { win: true }));
+}
+/** The CLI unpacked by GitHub Copilot Desktop's SDK, also usable by ACP clients. */
+export function copilotAppCopies(home = homedir()) {
+  const sdk = join(localAppData(home), 'github-copilot-sdk');
+  return [...versionedPrograms(join(sdk, 'cli'), 'copilot.exe'), ...versionedPrograms(join(sdk, 'runtime'), 'copilot.exe')];
+}
+
 /**
  * The program the person chose for an agent, as it can be started: a `.cmd` shim's target, the `.cmd` beside a
  * PowerShell shim (`.ps1`), the program inside a folder or an app chosen instead of it. Null when it is not there.
  */
-export function chosenProgram(path, { names = [], win = windows } = {}) {
+export function chosenProgram(path, { names = [], win = windows, home = homedir() } = {}) {
   if (typeof path !== 'string' || !isAbsolute(path)) return null;
   let folder = false;
   try { folder = statSync(path).isDirectory(); } catch { /* a file, or not there */ }
+  if (win && (folder || presentFile(path))) {
+    // Selecting a maker's app means its bundled agent, when one exists, as with a macOS .app.
+    const root = folder ? path : dirname(path);
+    if (names.includes('copilot') && (folder || /^github\.exe$/i.test(basename(path))) && existsFile(join(root, 'copilot-sdk', 'index.js'))) {
+      const copies = copilotAppCopies(home);
+      let best = copies[0];
+      let version = best ? copilotVersion(best) : null;
+      for (const copy of copies.slice(1)) {
+        const next = copilotVersion(copy);
+        if (laterVersion(next, version)) { best = copy; version = next; }
+      }
+      if (best) return best;
+    }
+    const app = folder || (names.includes('dsh') && /^DeepSeek Harness\.exe$/i.test(basename(path)))
+      || (names.includes('opencode') && /^OpenCode\.exe$/i.test(basename(path)));
+    if (app) {
+      const bundled = [
+        ...(names.includes('dsh') ? [join(root, 'resources', 'runtime', 'cli', 'bin', 'dsh.cmd')] : []),
+        ...(names.includes('opencode') ? [join(root, 'resources', 'opencode-cli.exe')] : []),
+      ].find((file) => presentFile(file) && !notTheAgent('', file, { win: true }));
+      if (bundled) return isCmdScript(bundled) ? cmdTarget(bundled) ?? bundled : bundled;
+    }
+  }
   if (folder) {
     const inApp = /\.app$/i.test(path) ? [...CODEX_IN_APP, OPENCODE_IN_APP, DSH_IN_APP, ...names.map((n) => `Contents/MacOS/${n}`)].map((p) => join(path, p)).find(executableFile) : null;
     return inApp ?? names.map((n) => findExecutable(n, [path, join(path, 'bin')], { PATH: '' }, { win })).find(Boolean) ?? null;
@@ -430,12 +505,13 @@ export function chosenProgram(path, { names = [], win = windows } = {}) {
  */
 export function detectAgentInstallation(id, { home = homedir(), env = process.env, pathDirs = HOME_BIN_CANDIDATES(home),
   applicationDirs = ['/Applications', join(home, 'Applications')], chosen = null, others = [], win = windows, codexVersionOf = codexVersion,
-  opencodeVersionOf = opencodeVersion } = {}) {
+  opencodeVersionOf = opencodeVersion, copilotVersionOf = copilotVersion, windowsApps } = {}) {
   const program = AGENT_PROGRAMS[id] ?? { names: [id] };
   const install = AGENT_DOWNLOADS[id] ?? null;
-  const picked = chosen ? chosenProgram(chosen, { names: program.names, win }) : null;
+  const picked = chosen ? chosenProgram(chosen, { names: program.names, win, home }) : null;
   if (picked && !notTheAgent(id, picked, { chosen, win })) return { installed: true, cli: picked, source: 'chosen', install };
-  const dirs = [...pathDirs, ...(program.dirs?.(home, win, applicationDirs) ?? [])];
+  const dirs = [...pathDirs, ...(program.dirs?.(home, win, applicationDirs) ?? []),
+    ...(win && id === 'deepseek' ? windowsAppDirs(id, home, windowsApps).map((dir) => join(dir, 'resources', 'runtime', 'cli', 'bin')) : [])];
   let cli = null;
   for (const name of program.names) {
     if (cli) break;
@@ -449,8 +525,10 @@ export function detectAgentInstallation(id, { home = homedir(), env = process.en
   const usable = (file) => (win ? presentFile(file) : executableFile(file));
   /* copies kept up to date by the maker's app (Codex: the Mac apps', or the one the Windows app starts), and how their
      version is told */
-  const copies = id === 'codex' ? [...codexInApps(applicationDirs), ...(win ? codexAppCopies(home) : []), ...others.filter((f) => usable(f) && !notTheAgent(id, f, { win }))] : id === 'opencode' ? opencodeInApps(applicationDirs) : [];
-  const versionOf = id === 'opencode' ? opencodeVersionOf : codexVersionOf;
+  const copies = id === 'codex' ? [...codexInApps(applicationDirs), ...(win ? codexAppCopies(home) : []), ...others.filter((f) => usable(f) && !notTheAgent(id, f, { win }))]
+    : id === 'opencode' ? [...opencodeInApps(applicationDirs), ...(win ? opencodeAppCopies(home, { windowsApps }) : [])]
+      : id === 'copilot' && win ? copilotAppCopies(home) : [];
+  const versionOf = id === 'opencode' ? opencodeVersionOf : id === 'copilot' ? copilotVersionOf : codexVersionOf;
   if (cli) {
     /* Claude Code both on the PATH (an npm install that is never updated, say) and in the Claude app, which keeps its
        own up to date: the later one, whose models are the current ones. One whose version can't be told stays. */
@@ -468,6 +546,13 @@ export function detectAgentInstallation(id, { home = homedir(), env = process.en
     return { installed: true, cli, source: 'path', install };
   }
   cli = copies[0] ?? null;
+  if (cli && (id === 'opencode' || id === 'copilot')) {
+    let version = versionOf(cli);
+    for (const copy of copies.slice(1)) {
+      const next = versionOf(copy);
+      if (laterVersion(next, version)) { cli = copy; version = next; }
+    }
+  }
   if (!cli && id === 'claude') cli = claudeAppCli(home, { win });
   if (!cli) cli = others.find((f) => usable(f) && !notTheAgent(id, f, { win })) ?? null;
   return { installed: Boolean(cli), cli, source: cli ? 'app' : null, install };
@@ -498,7 +583,9 @@ function folders(dir, re) {
  * The name of the maker's desktop app when it is installed (DESKTOP_APPS), or null: told from where it is, nothing
  * started. For an agent whose own program is not found: the app is here, its command-line agent is not.
  */
-export function desktopApp(id, { home = homedir(), applicationDirs = ['/Applications', join(home, 'Applications')], win = windows } = {}) {
+export function desktopApp(id, { home = homedir(), applicationDirs = ['/Applications', join(home, 'Applications')], win = windows, windowsApps } = {}) {
+  if (win && windowsAppDirs(id, home, windowsApps).length) return id === 'copilot' ? 'GitHub Copilot' : DESKTOP_APPS[id]?.name ?? AGENT_DEFINITIONS[id]?.name ?? null;
+  if (!win && id === 'copilot' && applicationDirs.some((dir) => folders(dir, /^GitHub Copilot\.app$/i).length)) return 'GitHub Copilot';
   const app = DESKTOP_APPS[id];
   if (!app) return null;
   const here = win
@@ -541,9 +628,11 @@ export function installCommand(id, { win = windows } = {}) {
  * the agent's names (any suffix, a PowerShell shim too) with what it runs, if that can be told, and why it is not the
  * agent when it is not (`refused`, notTheAgent).
  */
-export function searchReport(id, { home = homedir(), env = process.env, pathDirs = HOME_BIN_CANDIDATES(home), win = windows } = {}) {
+export function searchReport(id, { home = homedir(), env = process.env, pathDirs = HOME_BIN_CANDIDATES(home), win = windows, windowsApps } = {}) {
   const program = AGENT_PROGRAMS[id] ?? { names: [id] };
-  const searched = unique([...pathIn(env).split(win ? ';' : delimiter), ...pathDirs, ...(program.dirs?.(home, win) ?? [])], win);
+  const copies = win ? id === 'opencode' ? opencodeAppCopies(home, { windowsApps }) : id === 'copilot' ? copilotAppCopies(home) : [] : [];
+  const registered = win && (id === 'deepseek' || id === 'opencode') ? windowsAppDirs(id, home, windowsApps).map((dir) => id === 'deepseek' ? join(dir, 'resources', 'runtime', 'cli', 'bin') : join(dir, 'resources')) : [];
+  const searched = unique([...pathIn(env).split(win ? ';' : delimiter), ...pathDirs, ...(program.dirs?.(home, win) ?? []), ...registered, ...copies.map(dirname)], win);
   const files = [];
   for (const dir of searched) {
     for (const name of program.names) {
@@ -555,6 +644,9 @@ export function searchReport(id, { home = homedir(), env = process.env, pathDirs
         files.push({ file, runs, usable: !refused && (win ? suffix !== '' && suffix !== '.ps1' : executableFile(file)), ...(refused ? { refused } : {}) });
       }
     }
+  }
+  for (const file of copies) {
+    if (!files.some((entry) => entry.file.toLowerCase() === file.toLowerCase())) files.push({ file, runs: file, usable: true });
   }
   return { searched, files };
 }

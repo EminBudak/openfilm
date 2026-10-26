@@ -27,7 +27,7 @@ import { registerLocalAgentIpc } from './local-agents-ipc.mjs';
 import { readPreferences, registerChatIpc } from './chat-ipc.mjs';
 import { registerSkillsIpc } from './skills-ipc.mjs';
 import { createRoster } from './agent-roster.mjs';
-import { checkAgentProgram, closeEverySession, diagnoseAgent, listAgents, localAgent, openAgentInstaller, openAgentSignIn, setChosenPaths, signOutAgent } from './agents.mjs';
+import { checkAgentProgram, closeEverySession, diagnoseAgent, forgetAgentStatus, listAgents, localAgent, openAgentInstaller, openAgentSignIn, setChosenPaths, signOutAgent } from './agents.mjs';
 import { agentUsage, forgetAgentUsage } from './agent-usage.mjs';
 import { installOpenfilmCommand } from './openfilm-command.mjs';
 import { startUpdates } from './updates.mjs';
@@ -584,6 +584,7 @@ async function start() {
     onWorking: tellWorking,
     /* a tab says when its agent waits for the person's answer */
     onAsking: (folders) => void tellTabsWorking({ asking: folders }),
+    onConnectionResult: (id, error) => roster?.recordConnectionResult(id, error),
     /* the `openfilm` command first (with the app's ffmpeg and browser in it); the app's ffmpeg last, for a computer
        that has none of its own: the person's own ffmpeg and browsers are what the agent's commands use */
     binDir: installOpenfilmCommand(DATA, { ffmpeg: ffmpegHere, env: browsers }),
@@ -625,6 +626,7 @@ async function start() {
     /* sessions closed on connecting, disconnecting and switching account: the next look at its usage is for whichever
        account is used now */
     closeSessions: (id) => { forgetAgentUsage(id); localAgents?.closeAgent(id); },
+    resetAgent: (id) => { forgetAgentStatus(id); forgetAgentUsage(id); localAgents?.refreshSkills(id); },
     seal,
     unseal,
     onChange: (list) => broadcast('desktop:agents', list),
@@ -642,6 +644,7 @@ async function start() {
     return fn(opts ?? {});
   });
   agentHandle('desktop:agents:list', () => { void roster.refresh(); return roster.list(); });
+  agentHandle('desktop:agents:refresh', () => roster.recheck());
   agentHandle('desktop:agents:connect', ({ id }) => roster.connect(String(id)));
   agentHandle('desktop:agents:cancel-sign-in', ({ id }) => { roster.cancelSignIn(String(id)); return { ok: true }; });
   agentHandle('desktop:agents:disconnect', ({ id }) => { roster.disconnect(String(id)); return { ok: true }; });
@@ -652,6 +655,11 @@ async function start() {
   agentHandle('desktop:agents:automatic', ({ id }) => roster.useAutomatic(String(id)));
   agentHandle('desktop:agents:install', ({ id }) => roster.install(String(id)));
   agentHandle('desktop:agents:diagnose', ({ id }) => roster.diagnose(String(id)));
+  agentHandle('desktop:agents:setup', async ({ id }) => {
+    if (id !== 'claude') return { ok: false, error: 'No desktop setup for this agent.' };
+    try { await shell.openExternal('claude://'); return { ok: true }; }
+    catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; }
+  });
   /* the app's part of Studio's diagnostic report (app-report.mjs): the agents as found now, each one's --version */
   const appReport = () => gatherAppReport({ list: () => roster.refresh(), check: checkAgentProgram }, {
     version: app.getVersion(), flavor: FLAVOR, packaged: app.isPackaged, channel: updates?.snapshot()?.channel ?? null,

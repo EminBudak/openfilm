@@ -10,8 +10,8 @@ test('an agent not found offers Locate and its installer, or its install page', 
   assert.deepEqual(missingActions({ installer: 'x', install: 'https://example.test' }, { locate: false, install: false }), { locate: false, install: 'page' });
 });
 
-test("Claude Code waiting in the Claude app offers no Install or Locate: opening the app's Code tab downloads it", () => {
-  assert.deepEqual(missingActions({ setupRequired: 'code-tab', install: 'https://example.test' }, { locate: true, install: true }), { locate: false, install: null });
+test("Claude Code setup avoids reinstalling the app and still lets an existing CLI be selected", () => {
+  assert.deepEqual(missingActions({ setupRequired: 'code-tab', install: 'https://example.test' }, { locate: true, install: true }), { locate: true, install: null });
 });
 
 test("an account's organization is named unless it only repeats the email, as a personal Claude account's does", () => {

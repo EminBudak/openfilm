@@ -33,3 +33,14 @@ test("an agent's program: Studio's words; on Windows only programs and shims are
   assert.ok(win.properties?.includes('openFile'));
   assert.equal(programDialogOptions(null, 'darwin').filters, undefined, 'on a Mac an app can be chosen too');
 });
+
+test('choosing an agent installation folder opens a directory picker without file filters on Windows', () => {
+  const options = programDialogOptions({ title: 'Choose installation folder', kind: 'folder' }, 'win32');
+  assert.deepEqual(options.properties, ['openDirectory', 'showHiddenFiles']);
+  assert.equal(options.filters, undefined);
+  assert.equal(options.title, 'Choose installation folder');
+});
+
+test('the installation-folder picker accepts macOS app bundles as directories', () => {
+  assert.deepEqual(programDialogOptions({ kind: 'folder' }, 'darwin').properties, ['openDirectory', 'showHiddenFiles', 'treatPackageAsDirectory']);
+});

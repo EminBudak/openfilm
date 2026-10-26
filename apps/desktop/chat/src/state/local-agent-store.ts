@@ -64,7 +64,7 @@ function probeModel(state: Persisted, agent: LocalAgentId): string | undefined {
   return typeof model === 'string' && option?.options?.some((o) => o.value === model) ? model : undefined;
 }
 
-const probeKey = (agent: LocalAgentId, model: string | undefined) => JSON.stringify([agent, model]);
+const probeKey = (agent: LocalAgentId, model: string | undefined, revision = 0) => JSON.stringify([agent, model, revision]);
 
 const KEY = 'openfilm.local-agents.v2';
 
@@ -166,11 +166,12 @@ export function shownAgents(roster: RosterAgent[] | null): RosterAgent[] {
 export function currentAgent(state: Pick<LocalAgentStore, 'picked' | 'roster'>): LocalAgentId {
   const shown = shownAgents(state.roster);
   const picked = shown.find((a) => a.id === state.picked);
-  if (picked?.status === 'ready' || !state.roster) return state.picked;
+  if (picked && ['ready', 'checking', 'waiting'].includes(picked.status) || !state.roster) return state.picked;
   return shown.find((a) => a.status === 'ready')?.id ?? picked?.id ?? shown[0]?.id ?? state.picked;
 }
 
 let listening = false;
+let rosterRevision = 0;
 
 export const useLocalAgents = create<LocalAgentStore>((set, get) => ({
   picked: 'claude',
@@ -186,9 +187,12 @@ export const useLocalAgents = create<LocalAgentStore>((set, get) => ({
     if (api && !listening) {
       listening = true;
       api.onChange((roster) => {
+        rosterRevision++;
         /* an agent that stopped being ready: what its sessions held goes (it may be another account next time) */
         for (const before of get().roster ?? []) {
           const now = roster.find((a) => a.id === before.id);
+          if (before.configurationRevision !== now?.configurationRevision || before.status !== 'ready' && now?.status === 'ready') askedThisLaunch.delete(before.id);
+          if (before.configurationRevision !== now?.configurationRevision) forgetLocalAgentSessions(before.id);
           if (before.status === 'ready' && now?.status !== 'ready') forgetLocalAgentSessions(before.id);
           /* other models (the own key's): its sessions were closed for the next ones to use them */
           else if (JSON.stringify(byokModels([before])) !== JSON.stringify(byokModels(now ? [now] : []))) forgetLocalAgentSessions(before.id);
@@ -199,8 +203,9 @@ export const useLocalAgents = create<LocalAgentStore>((set, get) => ({
     void get().refresh();
   },
   async refresh() {
+    const revision = rosterRevision;
     const roster = await desktopBridge()?.agents?.list().catch(() => null);
-    if (roster) set({ roster });
+    if (roster && revision === rosterRevision) set({ roster });
   },
   pick(picked) {
     set({ picked });
@@ -238,8 +243,10 @@ export const useLocalAgents = create<LocalAgentStore>((set, get) => ({
     /* the own key's are known from Settings (agentOptions); a failed probe is not tried again on every render, each
        try being a whole session of the agent's */
     if (agent === 'byok' || probing.has(agent)) return;
+    if (!get().roster?.some((a) => a.id === agent && a.shown && a.status === 'ready')) return;
     const model = probeModel(get(), agent);
-    const key = probeKey(agent, model);
+    const currentKey = () => probeKey(agent, probeModel(get(), agent), get().roster?.find((a) => a.id === agent)?.configurationRevision ?? 0);
+    const key = currentKey();
     const kept = Boolean(get().options[agent]);
     const matched = model == null || get().options[agent]?.find((o) => o.category === 'model')?.currentValue === model;
     if (askedThisLaunch.get(agent) === key && (matched || get().optionsError[agent]) && (!retry || !get().optionsError[agent])) return;
@@ -251,14 +258,14 @@ export const useLocalAgents = create<LocalAgentStore>((set, get) => ({
     try {
       const r = await api.probe(agent, model).catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e), code: undefined }));
       // A newer model pick wins; an older response must not replace its effort list.
-      if (probeKey(agent, probeModel(get(), agent)) !== key) return;
+      if (currentKey() !== key || !get().roster?.some((a) => a.id === agent && a.shown && a.status === 'ready')) return;
       if (r.ok && r.info.commands?.length) keepCommands(agent, readCommands({ availableCommands: r.info.commands }));
       if (r.ok && r.info.configOptions?.length) get().noteOptions(agent, r.info.configOptions);
       /* the ones kept from before stay when this launch's ask fails */
       else if (!kept || model != null) set({ optionsError: { ...get().optionsError, [agent]: r.ok ? { text: 'no options' } : { text: r.error, ...(r.code ? { code: r.code } : {}) } } });
     } finally {
       probing.delete(agent);
-      if (probeKey(agent, probeModel(get(), agent)) !== key) void get().ensureOptions(agent);
+      if (currentKey() !== key) void get().ensureOptions(agent);
     }
   },
 }));
