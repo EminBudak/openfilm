@@ -993,6 +993,7 @@ export const ko: Words = {
     show: '표시',
     lock: '잠금',
     unlock: '잠금 해제',
+    delete: '삭제',
     notNow: '지금은 화면에 없습니다',
     restackFailed: '이 레이어의 순서를 바꾸지 못했습니다. 화면이 바뀌었을 수 있으니 다시 시도하세요.',
   },

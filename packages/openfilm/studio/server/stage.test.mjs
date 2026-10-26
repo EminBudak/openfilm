@@ -445,3 +445,32 @@ test('a picture inside a page says what it draws: an <img>, a box painted with o
     await stage.close();
   }
 });
+
+test('a deleted layer has no row in the Layers tree; what points only at it or inside it is found', { timeout: 60_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'of-stage-delete-'));
+  writeFileSync(join(dir, 'card.html'), `<!doctype html><body style="margin:0">
+<div id="card" style="position:absolute;left:20px;top:20px;width:200px;height:120px;background:#f60">
+  <h1 id="title" style="margin:0;font:700 24px sans-serif">Every parcel</h1>
+  <p class="note" style="margin:0;font:14px sans-serif">On time</p>
+</div>
+<p class="note" style="position:absolute;left:240px;top:20px;margin:0;font:14px sans-serif">Elsewhere</p>
+<script>window.film={duration:2,frame(){}}</script></body>`);
+  const overrides = [{ at: '#card', style: { display: 'none' } }, { at: '#title', t: [4, 0] }];
+  writeFileSync(join(dir, 'film.html'), filmHtml({ stage: { w: 320, h: 180 }, tracks: [{ clips: [{ id: 'card', src: 'card.html', overrides }] }] }));
+  const stage = await stageOf(dir);
+  try {
+    const labels = (rows) => rows.flatMap((r) => [r.label, ...labels(r.children)]);
+    const tree = await stage.ask('tree');
+    const shown = labels(tree[0].layers);
+    assert.ok(shown.includes('Elsewhere'), 'the layer outside it keeps its row');
+    assert.ok(!shown.includes('Every parcel') && !shown.includes('On time'), 'neither it nor what is inside it has a row');
+    const within = await stage.ask('within', {
+      clip: 'card',
+      of: [{ at: '#card' }],
+      targets: [{ at: '#card' }, { at: '#title' }, { at: '.note' }, { at: '.note', n: 1 }, { at: '.note', n: 2 }, { at: '#nothing' }, {}],
+    });
+    assert.deepEqual(within, [true, true, false, true, false, false, false]);
+  } finally {
+    await stage.close();
+  }
+});

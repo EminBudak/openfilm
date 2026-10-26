@@ -103,6 +103,7 @@ import type { StageEditFailure, StageTextEdit } from './FilmInspector';
 import { layerTarget, pageClipOf, recoverLayer } from '@/lib/stage-layers';
 import { pictureStyle, relativeTo, type TemplateControls } from '@/lib/template-controls';
 import { propsAttr, propsOf, type ComponentProp } from '@/lib/component-props';
+import { pointersOf, propsWithoutDeleted, withDeleted } from '@/lib/layer-delete';
 import type { PropsHost } from './PropertiesSection';
 import type { LayerPropsActions } from './FilmInspector';
 import { SAVED, refreshSaved, savedActions, savedSources, useSavedListing } from '@/lib/saved';
@@ -111,7 +112,7 @@ import { groupInsertAt, groupInsertOps } from '@/lib/saved-insert';
 import { pageClips, pageMayHave, similarEdits } from '@/lib/similar-layers';
 import type { MaskSession } from '@/lib/stage-mask';
 import type { MaskShape } from '@/lib/clip-mask';
-import { nextOverrides, overrideOf, type OverrideGeometry } from '@/lib/film-overrides';
+import { nextOverrides, overrideOf, type OverrideGeometry, type OverrideTarget } from '@/lib/film-overrides';
 import { compactScale, type MgTransform, type NodeOverride, type OverridePivot, type StageElement, type StageElementStyle, type StageGeometry } from '@/lib/stage-types';
 import { usePreviewPrefs } from '@/lib/preview-prefs';
 import { isTypingTarget } from './typing-target';
@@ -1550,6 +1551,57 @@ export function ProjectView({ projectId, onProject, onLeave }: {
     if (!byClip.size) return t('timeline.editFail');
     return editBlocks([...byClip].map(([loc, value]) => ({ loc, prop: 'overrides', value: value as unknown as Record<string, unknown> | null })));
   }, [editBlocks, t]);
+  /* layers deleted (lib/layer-delete): in each clip a `display: none` entry for each, and every change or property
+     that pointed only at them, or inside them, gone too (the stage tells which); one write, one undo step */
+  const deleteLayers = React.useCallback(async (elements: readonly StageElement[]): Promise<string | null> => {
+    type Clip = NonNullable<ReturnType<typeof pageClipOf>>['clip'];
+    /* the layers by the clip they are in (its place in film.html) */
+    const byClip = (doc: FilmDoc) => {
+      const out = new Map<string, { clip: Clip; targets: OverrideTarget[] }>();
+      for (const element of elements) {
+        const found = pageClipOf(doc, element);
+        const target = layerTarget(element);
+        if (!found || !target) continue;
+        const entry = out.get(found.loc) ?? { clip: found.clip, targets: [] };
+        entry.targets.push(target);
+        out.set(found.loc, entry);
+      }
+      return out;
+    };
+    const keyOf = (at: OverrideTarget) => JSON.stringify([at.at, at.n ?? null]);
+    const asked = filmRef.current ? byClip(filmRef.current as unknown as FilmDoc) : null;
+    if (!asked?.size) return t('timeline.editFail');
+    /* per clip, where its changes and properties point that is only at the deleted layers or inside them */
+    const gone = new Map<string, Set<string>>();
+    for (const { clip, targets } of asked.values()) {
+      const pointers = pointersOf(clip.overrides, propsOf(clip));
+      const all = [...pointers.overrides, ...pointers.props].filter((at): at is OverrideTarget => at != null);
+      const answer = await preview.current?.stage?.<boolean[]>('within', { clip: clip.id, of: targets, targets: all }) ?? [];
+      gone.set(clip.id, new Set(all.filter((_, i) => answer[i] === true).map(keyOf)));
+    }
+    /* the film read again after asking: an edit kept meanwhile is not written over */
+    const doc = filmRef.current as unknown as FilmDoc | null;
+    const now = doc ? byClip(doc) : null;
+    if (!now?.size) return t('timeline.editFail');
+    const edits: ClipEdit[] = [];
+    for (const [loc, { clip, targets }] of now) {
+      const out = gone.get(clip.id) ?? new Set<string>();
+      const isGone = (at: OverrideTarget | null) => Boolean(at && out.has(keyOf(at)));
+      const props = propsOf(clip);
+      const pointers = pointersOf(clip.overrides, props);
+      const overrides = withDeleted(clip.overrides, targets, pointers.overrides.map(isGone));
+      edits.push({ loc, prop: 'overrides', value: overrides as unknown as Record<string, unknown> | null });
+      const kept = propsWithoutDeleted(props, pointers.props.map(isGone));
+      if (kept.length !== props.length) edits.push({ loc, prop: 'props', value: propsAttr(kept) });
+    }
+    const failed = await editBlocks(edits);
+    /* refused (a locked track), what is in hand stays in hand */
+    if (!failed) {
+      setStageElement((el) => (el && elements.some((x) => x.loc === el.loc && x.clipId === el.clipId) ? null : el));
+      stageControl.current?.letGo(elements);
+    }
+    return failed;
+  }, [editBlocks, t]);
   const editStageStyle = React.useCallback(async (loc: string, patch: StageElementStyle): Promise<string | null> => {
     const held = stageElementRef.current;
     if (!held?.clipLoc) return t('timeline.editFail');
@@ -1665,6 +1717,12 @@ export function ProjectView({ projectId, onProject, onLeave }: {
     const patch = what === 'hidden' ? { style: { visibility: row.hidden ? null : 'hidden' } } : { lock: !row.locked };
     void editStageOverrides([{ element: layerElement(clipId, at, row.instance, row.label), patch: patch as OverrideGeometry }]).then((f) => { if (f) toast.show(f); });
   }, [editStageOverrides, toast]); // eslint-disable-line react-hooks/exhaustive-deps
+  const deleteLayerRow = React.useCallback((clipId: string, row: LayerRow) => {
+    const at = row.instance ? row.loc.slice(0, -`#${row.instance}`.length) : row.loc;
+    /* its outline on the picture goes with it */
+    setPointedLayer(null);
+    void deleteLayers([layerElement(clipId, at, row.instance, row.label)]).then((f) => { if (f) toast.show(f); });
+  }, [deleteLayers, toast]); // eslint-disable-line react-hooks/exhaustive-deps
   const restackLayers = React.useCallback((clipId: string, edits: StageArrangeResult['edits']) => {
     void editStageOverrides(edits.map(({ target, style }) => ({ element: layerElement(clipId, target.at, target.n, target.at), patch: { style } as OverrideGeometry })))
       .then((f) => { if (f) toast.show(f); });
@@ -1762,6 +1820,7 @@ export function ProjectView({ projectId, onProject, onLeave }: {
   const stageMenuFor = React.useCallback((el: StageElement, ctx: StageMenuContext) => stageMenu(el, ctx, {
     editOverride: (element, patch) => { void editStageOverrideRef.current(element, patch).then((f) => { if (f) toast.show(f); }); },
     editOverrides: (list) => { void editStageOverrides(list).then((f) => { if (f) toast.show(f); }); },
+    deleteLayers: (list) => { void deleteLayers(list).then((f) => { if (f) toast.show(f); }); },
     selectParent: selectStageParent,
     selectClip: selectStageClip,
     notify: (message) => toast.show(message),
@@ -2767,6 +2826,7 @@ export function ProjectView({ projectId, onProject, onLeave }: {
                       onSelectClip={selectStageClip}
                       onPoint={setPointedLayer}
                       onToggle={toggleLayerRow}
+                      onDelete={deleteLayerRow}
                       onRestack={restackLayers}
                       onNotify={toast.show}
                       width={layersShownWidth}

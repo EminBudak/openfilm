@@ -997,6 +997,7 @@ export const en = {
     show: 'Show',
     lock: 'Lock',
     unlock: 'Unlock',
+    delete: 'Delete',
     notNow: 'Not on the picture at this moment',
     restackFailed: 'That layer couldn\'t be restacked. The picture may have changed; try again.',
   },

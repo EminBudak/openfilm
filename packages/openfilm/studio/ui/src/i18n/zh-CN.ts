@@ -997,6 +997,7 @@ export const zhCN: Words = {
     show: '显示',
     lock: '锁定',
     unlock: '解锁',
+    delete: '删除',
     notNow: '此刻不在画面上',
     restackFailed: '这个图层没能调整顺序。画面可能刚变过，再试一次。',
   },

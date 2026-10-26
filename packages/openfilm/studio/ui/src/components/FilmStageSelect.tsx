@@ -216,6 +216,8 @@ export interface FilmStageControl {
   picked(): StagePick[];
   /** Write now what the arrow keys moved and is not written yet: before an undo, or any other edit. */
   flushPending(): void;
+  /** These layers deleted: let go of them if they are in hand, so no frame stays on what is gone. */
+  letGo(elements: readonly StageElement[]): void;
   /**
    * Several layers in hand: their bounds put at `x` / `y` (all moved alike), or made `w` / `h` wide (all scaled alike,
    * in proportion, about the bounds' top left), as the inspector's fields move and scale a selection. Stage px.
@@ -1144,15 +1146,17 @@ function FilmStageSelectImpl({
         if (!nudgeClip(e)) nudgeLayer(e);
         return;
       }
-      /* the shortcuts are the menu's items: ⇧⌘H hide, ⇧⌘L lock, ] / [ to the front / back; grayed ones
-         do nothing. A whole clip's delete / copy / paste are the timeline's keys. */
+      /* the shortcuts are the menu's items: ⇧⌘H hide, ⇧⌘L lock, ] / [ to the front / back, Delete (the timeline's
+         keys for it) deletes; grayed ones do nothing. A whole clip's delete / copy / paste are the timeline's keys. */
       const mod = e.metaKey || e.ctrlKey;
       const k = e.key.toLowerCase();
+      const action = keyAction(e);
       const menuId = mod && e.shiftKey && k === 'h' ? 'hide'
         : mod && e.shiftKey && k === 'l' ? 'lock'
           : !mod && !e.altKey && e.key === ']' ? 'front'
             : !mod && !e.altKey && e.key === '[' ? 'back'
-              : null;
+              : action === 'remove' || action === 'ripple-delete' ? 'delete'
+                : null;
       /* C crops the video or still in hand */
       if (!mod && !e.altKey && !e.shiftKey && k === 'c' && !textEdit.current && !typingNow()) {
         if (startCrop()) e.preventDefault();
@@ -1173,8 +1177,12 @@ function FilmStageSelectImpl({
             e.preventDefault();
             e.stopPropagation();
             item.onSelect();
+            /* a delete leaves no frame behind (the layer is gone) */
+            if (menuId === 'delete') dropPick();
             return;
           }
+          /* a locked layer's Delete deletes nothing, not its clip on the timeline either */
+          if (item && menuId === 'delete') { e.preventDefault(); e.stopPropagation(); return; }
         }
       }
       if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
@@ -1349,6 +1357,11 @@ function FilmStageSelectImpl({
     return () => { lookPreviewRef.current = null; };
   }, [ask, lookPreviewRef]);
 
+  const letGoRef = React.useRef<(elements: readonly StageElement[]) => void>(() => {});
+  letGoRef.current = (elements) => {
+    const held = [...(multiRef.current ?? []).map((item) => item.element), pickedRef.current?.element];
+    if (held.some((h) => h && elements.some((e) => e.loc === h.loc && e.clipId === h.clipId))) dropPick();
+  };
   /* the inspector's live layer previews */
   React.useEffect(() => {
     if (!controlRef) return undefined;
@@ -1358,6 +1371,7 @@ function FilmStageSelectImpl({
       return target && element.clipId ? { clip: element.clipId, ...target } : null;
     };
     controlRef.current = {
+      letGo: (elements) => letGoRef.current(elements),
       previewStyle(element, patch) {
         const at = named(element);
         if (at) void ask('tweak', { ...at, patch: { style: clean(patch as Record<string, string | number | null | undefined>) } }).then(syncGeomSoon);

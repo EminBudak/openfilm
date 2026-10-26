@@ -1228,13 +1228,17 @@
 
   /* ── the Layers panel's tree ── */
   const ROWS = 800;
-  /** Per element, whether the clip's kept overrides hide it (the panel's eye) or lock it: the last one to say counts. */
+  /**
+   * Per element, whether the clip's kept overrides hide it (the panel's eye), lock it, or delete it (`display: none`,
+   * the panel's delete: it has no row): the last one to say counts.
+   */
   const ownOverrides = (c) => {
     const out = new Map();
     for (const o of c.overrides ?? []) {
       const says = {
         ...(o.style && 'visibility' in o.style ? { hidden: o.style.visibility === 'hidden' } : {}),
         ...('lock' in o ? { locked: o.lock === true } : {}),
+        ...(o.style && 'display' in o.style ? { deleted: o.style.display === 'none' } : {}),
       };
       if (Object.keys(says).length) for (const el of matches(c.win.document, o)) out.set(el, { ...out.get(el), ...says });
     }
@@ -1260,7 +1264,7 @@
       for (const ch of parentEl.children) {
         if (count >= ROWS) break;
         const tag = ch.localName.toLowerCase();
-        if (SKIP.has(tag) || ch.hasAttribute(EDITOR_ATTR)) continue;
+        if (SKIP.has(tag) || ch.hasAttribute(EDITOR_ATTR) || kept.get(ch)?.deleted) continue;
         const kind = kindOf(ch) ?? (isGroup(ch) ? 'box' : null);
         const leaf = tag === 'svg' || kind === 'text' || kind === 'image';
         const inner = leaf ? [] : collect(ch);
@@ -1460,6 +1464,21 @@
           clip: c.id,
           lost: c.overrides.filter((o, i) => o?.at && !c.found?.[i] && !matches(c.win.document, o).length).map((o) => o.at),
         }));
+    },
+    /**
+     * Which of `targets` (selectors with their match, as overrides and component properties name a layer) name only
+     * layers that are, or are inside, the layers `of` of clip `clip`: what deleting those leaves pointing at nothing.
+     * One answer per target; a target that finds nothing is not one of them.
+     */
+    within({ clip, of, targets }) {
+      const c = clipById(clip);
+      const doc = c?.kind === 'page' ? c.win?.document : null;
+      if (!doc) return null;
+      const gone = (of ?? []).flatMap((o) => matches(doc, o));
+      return (targets ?? []).map((o) => {
+        const found = o?.at ? matches(doc, o) : [];
+        return found.length > 0 && found.every((el) => gone.some((g) => g.contains(el)));
+      });
     },
     /** Stop showing what was not kept on a clip (a refused edit, a cancelled drag). */
     release({ clip }) { release(clip); return true; },

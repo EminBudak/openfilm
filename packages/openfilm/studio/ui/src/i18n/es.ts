@@ -996,6 +996,7 @@ export const es: Words = {
     show: 'Mostrar',
     lock: 'Bloquear',
     unlock: 'Desbloquear',
+    delete: 'Eliminar',
     notNow: 'No está en la imagen en este momento',
     restackFailed: 'No se pudo reordenar esa capa. Puede que la imagen haya cambiado; inténtalo de nuevo.',
   },

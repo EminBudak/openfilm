@@ -4,7 +4,8 @@
  * together; and after them on every menu, Show… / Unlock… for the layers that cannot be clicked any more. Items that
  * cannot run stay, grayed, with the reason.
  *
- * Layer changes are overrides (the editor writes film.html); the clip's actions are the editor's, passed in.
+ * Layer changes are overrides (the editor writes film.html), a delete too (lib/layer-delete); the clip's actions are
+ * the editor's, passed in.
  */
 import type * as React from 'react';
 import {
@@ -76,6 +77,8 @@ export interface StageMenuActions {
   editOverride(element: StageElement, patch: OverrideGeometry | null): void;
   /** Several layers' overrides at once: one save, one undo step. */
   editOverrides(list: ReadonlyArray<{ element: StageElement; patch: OverrideGeometry | null }>): void;
+  /** Layers deleted from their clips (lib/layer-delete): one save, one undo step; without it a layer has no Delete. */
+  deleteLayers?(elements: readonly StageElement[]): void;
   /** Select the layer at `loc` in the clip at `clipLoc` (a parent). */
   selectParent(loc: string, clipLoc?: string): void;
   /** Select the whole clip (as on the timeline). */
@@ -168,6 +171,15 @@ export function stageMenu(el: StageElement, ctx: StageMenuContext, actions: Stag
       id: 'lock', label: allLocked ? t('stageMenu.unlock') : t('stageMenu.lock'), icon: allLocked ? <Unlock size={14} /> : <Lock size={14} />, shortcut: lockKeys,
       onSelect: () => actions.editOverrides(many.map((x) => ({ element: x, patch: { lock: !allLocked } }))),
     });
+    const deleteLayers = actions.deleteLayers;
+    if (deleteLayers) {
+      m.sep();
+      const anyLocked = many.some((x) => x.override?.lock);
+      m.push({
+        id: 'delete', label: t('timeline.removeBlock'), icon: <Trash2 size={14} />, danger: true, shortcut: hintOf(currentKeymap(), 'remove', MAC),
+        disabled: anyLocked, hint: t('stageMenu.lockedHint'), onSelect: () => deleteLayers(many),
+      });
+    }
     return m.done();
   }
 
@@ -258,6 +270,14 @@ export function stageMenu(el: StageElement, ctx: StageMenuContext, actions: Stag
   if (clipLoc) m.push({ id: 'clip', label: t('stageMenu.selectClip'), icon: <Layers size={14} />, onSelect: () => actions.selectClip(clipLoc) });
   const words = el.text?.value;
   if (words) m.push({ id: 'copy-text', label: t('stageMenu.copyText'), icon: <CopyIcon size={14} />, onSelect: () => { void navigator.clipboard?.writeText(words).catch(() => {}); } });
+  const deleteLayers = actions.deleteLayers;
+  if (deleteLayers) {
+    m.sep();
+    m.push({
+      id: 'delete', label: t('timeline.removeBlock'), icon: <Trash2 size={14} />, danger: true, shortcut: hintOf(currentKeymap(), 'remove', MAC),
+      disabled: locked, hint: t('stageMenu.lockedHint'), onSelect: () => deleteLayers([el]),
+    });
+  }
   return m.done();
 }
 

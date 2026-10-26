@@ -996,6 +996,7 @@ export const ja: Words = {
     show: '表示',
     lock: 'ロック',
     unlock: 'ロック解除',
+    delete: '削除',
     notNow: 'この時点では画面にありません',
     restackFailed: 'このレイヤーの重ね順を変更できませんでした。画面が変わった可能性があります。もう一度お試しください。',
   },

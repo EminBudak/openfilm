@@ -1,15 +1,16 @@
 /**
  * The Layers panel: what is on the picture at the playhead as layers, the top one first. Each picture clip shown is
  * a row; a page clip opens into its layers, each level in the order the page draws it. A row selects its layer on
- * the picture (and the picture's selection opens the rows down to it); its eye hides it and its lock keeps it from
- * being moved; dragged up or down its own level, or into the level of a row around it (which then moves, with all
- * it holds: CSS restacks only within a level), it is restacked (z-index overrides, studio/server/stage.js
- * `restack`). Nothing is kept here: the tree is read from the pages each time they may have changed, and every
- * change is an override of the page clip in film.html.
+ * the picture (and the picture's selection opens the rows down to it); its eye hides it, its lock keeps it from
+ * being moved and its bin deletes it (lib/layer-delete; Delete or Backspace does too, for the layer in hand on the
+ * picture, which a row's click makes it); dragged up or down its own level, or into the level of a row around it
+ * (which then moves, with all it holds: CSS restacks only within a level), it is restacked (z-index overrides,
+ * studio/server/stage.js `restack`). Nothing is kept here: the tree is read from the pages each time they may have
+ * changed, and every change is an override of the page clip in film.html.
  */
 import React from 'react';
 import {
-  ChevronRight, Eye, EyeOff, Film, Globe, Image as ImageIcon, Lock, LockOpen, Shapes, Square, SquareDashed, Type, X,
+  ChevronRight, Eye, EyeOff, Film, Globe, Image as ImageIcon, Lock, LockOpen, Shapes, Square, SquareDashed, Trash2, Type, X,
 } from 'lucide-react';
 import { useT } from '@/i18n';
 import {
@@ -45,6 +46,8 @@ export interface LayersPanelProps {
   onPoint: (target: { clipId: string; loc: string } | null) => void;
   /** The eye or the lock of a row. */
   onToggle: (clipId: string, row: LayerRow, what: 'hidden' | 'locked') => void;
+  /** A row's bin: its layer deleted. */
+  onDelete: (clipId: string, row: LayerRow) => void;
   /** A level restacked: the overrides to write in the clip, or why nothing was (a message). */
   onRestack: (clipId: string, edits: StageArrangeResult['edits']) => void;
   onNotify: (message: string) => void;
@@ -206,7 +209,8 @@ export function LayersPanel(p: LayersPanelProps) {
                 if (loc) p.onSelectClip(loc);
               }}
               onPoint={() => p.onPoint(line.row ? { clipId: line.clipId, loc: line.row.loc } : null)}
-              onToggle={(what) => { if (line.row) p.onToggle(line.clipId, line.row, what); }} />
+              onToggle={(what) => { if (line.row) p.onToggle(line.clipId, line.row, what); }}
+              onDelete={() => { if (line.row) p.onDelete(line.clipId, line.row); }} />
           ))}
           {drag ? (
             <div aria-hidden className="pointer-events-none absolute right-2 h-0.5 rounded-full bg-[var(--accent)]"
@@ -224,7 +228,7 @@ export function LayersPanel(p: LayersPanelProps) {
   );
 }
 
-function LayerLineRow({ line, top, t, clipOf, selected, dragging, onToggleOpen, onPress, onClick, onPoint, onToggle }: {
+function LayerLineRow({ line, top, t, clipOf, selected, dragging, onToggleOpen, onPress, onClick, onPoint, onToggle, onDelete }: {
   line: LayerLine;
   top: number;
   t: ReturnType<typeof useT>;
@@ -236,6 +240,7 @@ function LayerLineRow({ line, top, t, clipOf, selected, dragging, onToggleOpen, 
   onClick: () => void;
   onPoint: () => void;
   onToggle: (what: 'hidden' | 'locked') => void;
+  onDelete: () => void;
 }) {
   const row = line.row;
   const clip = row ? null : clipOf(line.clipId);
@@ -270,6 +275,16 @@ function LayerLineRow({ line, top, t, clipOf, selected, dragging, onToggleOpen, 
       ) : <span className="w-4 shrink-0" />}
       <Icon size={13} className={`shrink-0 ${dim ? 'opacity-40' : 'text-[var(--text-muted)]'}`} aria-hidden />
       <span className={`min-w-0 flex-1 truncate ${row ? '' : 'font-medium text-[var(--text)]'} ${dim ? 'opacity-45' : ''}`}>{label}</span>
+      {row && !row.locked ? (
+        <Tooltip label={t('layers.delete')} side="bottom">
+          <button type="button" aria-label={t('layers.delete')}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--text-dim)] opacity-0 hover:bg-[var(--bg-hover)] hover:text-[var(--err)] focus-visible:opacity-100 group-hover:opacity-100">
+            <Trash2 size={12} />
+          </button>
+        </Tooltip>
+      ) : null}
       {row ? flag('locked', row.locked, Lock, LockOpen, t('layers.unlock'), t('layers.lock')) : null}
       {row ? flag('hidden', row.hidden, EyeOff, Eye, t('layers.show'), t('layers.hide')) : null}
     </div>
