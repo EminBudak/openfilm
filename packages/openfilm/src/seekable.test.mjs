@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { filmHtml } from './film-doc.mjs';
@@ -195,6 +195,44 @@ console.log(copies.get(${JSON.stringify(file)}) ?? '');`;
     assert.equal(a, b);
     assert.equal(times(a).length, 90, 'whole');
     assert.equal(readdirSync(join(dir, '.film', 'cache', 'seek')).length, 1, 'no part left');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a copy whose graphics chip hangs is stopped and made on the processor, and leaves no ffmpeg running', {
+  ...ffmpeg, skip: ffmpeg.skip || (process.platform === 'win32' && 'a shell script stands in for ffmpeg'),
+}, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'of-seekable-hung-'));
+  try {
+    const file = join(dir, 'prores.mov');
+    execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30', '-t', '1', '-c:v', 'prores_ks', '-profile:v', '3', file]);
+    /* ffmpeg, with a chip encoder that passes its test and then hangs on the copy: it writes its pid and never ends */
+    const bin = join(dir, 'bin');
+    mkdirSync(bin);
+    const encoder = process.platform === 'darwin' ? 'h264_videotoolbox' : 'h264_nvenc';
+    const pidFile = join(dir, 'hung.pid');
+    writeFileSync(join(bin, 'ffmpeg'), `#!/bin/sh
+case " $* " in
+  *" -encoders "*) "$REAL_FFMPEG" "$@"; echo " V....D ${encoder} the chip's"; exit 0;;
+  *" ${encoder} "*" -f null - "*) exit 0;;
+  *" ${encoder} "*) echo $$ > '${pidFile}'; exec sleep 600;;
+esac
+exec "$REAL_FFMPEG" "$@"
+`);
+    chmodSync(join(bin, 'ffmpeg'), 0o755);
+    const real = execFileSync('sh', ['-c', 'command -v ffmpeg']).toString().trim();
+    const code = `const { seekableCopies } = await import(${JSON.stringify(new URL('./seekable.mjs', import.meta.url).href)});
+const copies = await seekableCopies([${JSON.stringify(file)}], ${JSON.stringify(dir)}, { plays: async () => false, slow: false });
+console.log(copies.get(${JSON.stringify(file)}) ?? '');`;
+    const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, REAL_FFMPEG: real };
+    const copy = await new Promise((done, fail) => execFile(process.execPath, ['--input-type=module', '-e', code], { env }, (e, out) => (e ? fail(e) : done(String(out).trim()))));
+    assert.ok(existsSync(pidFile), 'the chip was tried');
+    assert.ok(copy, 'made all the same');
+    assert.equal(times(copy).length, 30, 'whole');
+    assert.equal(readdirSync(join(dir, '.film', 'cache', 'seek')).length, 1, 'no part left');
+    const pid = Number(readFileSync(pidFile, 'utf8'));
+    assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' }, 'the hung ffmpeg was stopped');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

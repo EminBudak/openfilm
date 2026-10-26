@@ -23,6 +23,9 @@ const MAX_SECONDS = 10 * 60;
 const MAX_SIDE = 4096;
 /** Changing how copies are made makes new ones. */
 const VERSION = 2;
+/** A copy on the graphics chip that writes nothing for this long has hung (VideoToolbox does on some virtual Macs):
+    stopped, and made on the processor. */
+const STALL_MS = 15_000;
 
 /** @param {string} file @returns {Promise<string>} */
 const probe = (file, args) => new Promise((done, fail) => {
@@ -248,7 +251,11 @@ async function makeCopy(file, out, need, signal) {
      when told them */
   const bits = Math.min(120e6, Math.max(4e6, ((need.w * need.h) || 1920 * 1080) * need.fps * 0.3));
   /* decoded and written on the graphics chip when it can (encoders.mjs), else on the processor */
+  let stalled = false;
   const make = async (/** @type {string | null} */ encoder, /** @type {string[]} */ decoding) => {
+    const chip = Boolean(encoder) || decoding.length > 0;
+    /* a chip that hung is not tried again for this copy: straight to the processor */
+    if (chip && stalled) throw new Error('the graphics chip hung');
     /* the same frames at the same times (passthrough: no frame is added or dropped), the picture only */
     const run = ffmpeg([...decoding, '-i', file, '-map', '0:v:0', '-an', '-sn', '-dn', '-fps_mode', 'passthrough',
       ...(need.scaled ? ['-vf', `scale=${need.w}:${need.h}`] : []),
@@ -259,7 +266,25 @@ async function makeCopy(file, out, need, signal) {
     /* its whole tree: an ffmpeg that is a shim (Windows' package managers) runs the real one as its child */
     const stop = () => kill(run.proc);
     signal?.addEventListener('abort', stop, { once: true });
-    try { await run.done; } finally { signal?.removeEventListener('abort', stop); }
+    /* on the chip, the part must keep growing: one that does not for STALL_MS is stopped */
+    let watch;
+    const hung = new Promise((_, fail) => {
+      if (!chip) return;
+      let size = -1, since = Date.now();
+      watch = setInterval(() => {
+        let now = 0;
+        try { now = statSync(part).size; } catch { /* not there yet */ }
+        if (now !== size) { size = now; since = Date.now(); return; }
+        if (Date.now() - since < STALL_MS) return;
+        stalled = true;
+        clearInterval(watch);
+        stop();
+        /* given a moment to end, so the next try never writes the part with it */
+        const ended = run.done.catch(() => {});
+        Promise.race([ended, new Promise((r) => setTimeout(r, 5000).unref())]).then(() => fail(new Error(`the graphics chip wrote nothing for ${STALL_MS / 1000} s`)));
+      }, 1000);
+    });
+    try { await Promise.race([run.done, hung]); } finally { clearInterval(watch); signal?.removeEventListener('abort', stop); }
   };
   /* a part that cannot be removed (Windows, a moment after its encoder ends) stays in the cache folder: it never fails
      the render that asked for the copy */

@@ -31,9 +31,45 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
-      - run: pnpm --filter openfilm exec playwright-core install --with-deps chromium-headless-shell
-      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      # Ubuntu's packages (Playwright's system libraries and fonts, ffmpeg) come through apt, whose mirror at times took
+      # 20 to 40 minutes for them. The .deb files are kept in the Actions cache, by runner image: apt fetches only what
+      # changed since. A stalled mirror is left for the next one after 30 s (not 120), a failed download is tried
+      # again, and a step that is still slow ends the job there, not at its limit with the tests unrun
+      - id: apt
         if: runner.os == 'Linux'
+        run: |
+          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nAPT::Keep-Downloaded-Packages "true";\n' | sudo tee /etc/apt/apt.conf.d/80-ci
+          echo "prefix=apt-$ImageOS-" >> "$GITHUB_OUTPUT"
+          echo "key=apt-$ImageOS-$ImageVersion" >> "$GITHUB_OUTPUT"
+      - id: apt-cache
+        if: runner.os == 'Linux'
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/apt-archives
+          key: ${{ steps.apt.outputs.key }}
+          restore-keys: ${{ steps.apt.outputs.prefix }}
+      - if: runner.os == 'Linux'
+        run: |
+          mkdir -p ~/apt-archives
+          sudo cp ~/apt-archives/*.deb /var/cache/apt/archives/ 2>/dev/null || true
+          echo "$(ls ~/apt-archives | wc -l) packages from the cache"
+      # on Ubuntu its apt-get update is the only one: ffmpeg's install below uses it
+      - run: pnpm --filter openfilm exec playwright-core install --with-deps chromium-headless-shell
+        timeout-minutes: 15
+      - if: runner.os == 'Linux'
+        timeout-minutes: 10
+        run: |
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -hide_banner -version | head -n 1
+          # what the cache keeps: the packages as they are now, none an update replaced
+          sudo apt-get autoclean -y > /dev/null
+          rm -f ~/apt-archives/*.deb
+          cp /var/cache/apt/archives/*.deb ~/apt-archives/
+      - if: runner.os == 'Linux' && steps.apt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/apt-archives
+          key: ${{ steps.apt.outputs.key }}
       - run: brew install ffmpeg
         if: runner.os == 'macOS'
       # Chocolatey reports success when its feed times out and nothing is installed: tried three times, then the step
