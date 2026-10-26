@@ -11,9 +11,11 @@ const tree = {
     '@earendil-works/pi-coding-agent': { version: '1.1.0', dependencies: {
       '@earendil-works/pi-codemode': { version: '1.1.0' },
       diff: { version: '8.0.4' },
+      undici: { version: '8.12.2' },
     } },
     '@agentclientprotocol/codex-acp': { version: '1.13.1', dependencies: { diff: { version: '9.0.0' } } },
     diff: { version: '9.0.0' },
+    undici: { version: '8.12.2' },
     openfilm: { version: 'link:../../packages/openfilm', dependencies: { 'playwright-core': { version: '1.50.0' } } },
   },
 };
@@ -22,6 +24,8 @@ test("the installer's npm install is pinned to the lockfile's versions", () => {
   assert.deepEqual(lockedOverrides(tree), {
     '@earendil-works/pi-codemode': '1.1.0',
     'playwright-core': '1.50.0',
+    /* the package's own, which another depends on too (pinned there at an older version): that one everywhere */
+    undici: '$undici',
     /* two versions of diff: each under what depends on it; the package's own (exact) is not overridden */
     '@earendil-works/pi-coding-agent': { diff: '8.0.4' },
     '@agentclientprotocol/codex-acp': { diff: '9.0.0' },

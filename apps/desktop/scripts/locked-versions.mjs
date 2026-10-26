@@ -13,8 +13,9 @@ const SEMVER = /^\d+\.\d+\.\d+(?:-[\w.]+)?$/;
 /**
  * npm `overrides` from `pnpm list --prod --depth Infinity --json` of the package (its first entry). A package locked at
  * one version is pinned to it; one locked at several is pinned under each package that depends on it. The package's
- * own dependencies are not pinned themselves: they are exact in its package.json already, and npm refuses an override
- * of one.
+ * own dependencies are exact in its package.json already; one that another package depends on too is pinned to that
+ * (`$name`, the only override npm takes for one), as pnpm's own overrides lift a version a dependency pins (undici,
+ * pinned at 8.10.2 by pi-coding-agent).
  * @param {{ dependencies?: Record<string, any> }} tree
  */
 export function lockedOverrides(tree) {
@@ -22,12 +23,14 @@ export function lockedOverrides(tree) {
   const versions = new Map();
   /** @type {Array<[string, string, string]>} parent, child, child's version */
   const edges = [];
+  /** names some package depends on, not only the package itself */
+  const nested = new Set();
   const walk = (deps, parent) => {
     for (const [name, dep] of Object.entries(deps ?? {})) {
       if (SEMVER.test(dep?.version ?? '')) {
         if (!versions.has(name)) versions.set(name, new Set());
         versions.get(name).add(dep.version);
-        if (parent) edges.push([parent, name, dep.version]);
+        if (parent) { edges.push([parent, name, dep.version]); nested.add(name); }
       }
       walk(dep?.dependencies, name);
     }
@@ -37,12 +40,15 @@ export function lockedOverrides(tree) {
 
   /** @type {Record<string, string | Record<string, string>>} */
   const overrides = {};
-  for (const [name, set] of versions) if (set.size === 1 && !direct.has(name)) overrides[name] = [...set][0];
+  for (const [name, set] of versions) {
+    if (set.size !== 1) continue;
+    if (!direct.has(name)) overrides[name] = [...set][0];
+    else if (nested.has(name)) overrides[name] = `$${name}`;
+  }
   for (const [parent, child, version] of edges) {
     if (versions.get(child).size === 1) continue;
-    const parents = versions.get(parent);
     let entry = overrides[parent];
-    if (typeof entry !== 'object') entry = overrides[parent] = parents.size === 1 && !direct.has(parent) ? { '.': [...parents][0] } : {};
+    if (typeof entry !== 'object') entry = overrides[parent] = typeof entry === 'string' ? { '.': entry } : {};
     /* the same parent name wanting two versions of it (two versions of the parent): left to npm */
     if (entry[child] && entry[child] !== version) entry[child] = null;
     else if (entry[child] !== null) entry[child] = version;
