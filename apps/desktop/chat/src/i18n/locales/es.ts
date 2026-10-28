@@ -125,8 +125,6 @@ export const es: Words = {
   assets: {
     close: 'Cerrar',
     download: 'Descargar',
-    imageActualSize: 'Tamaño original',
-    imageFit: 'Ajustar',
     noPreview: 'Este tipo de archivo no se puede previsualizar aquí: descárgalo',
     previewFailed: 'No se pudo leer este archivo',
   },

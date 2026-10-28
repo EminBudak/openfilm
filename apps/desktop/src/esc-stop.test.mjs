@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ESC_AGAIN_MS, escStopper } from '../chat/src/lib/esc-stop.ts';
+import { ESC_AGAIN_MS, escStopper, escTaken } from '../chat/src/lib/esc-stop.ts';
 
 const esc = (timeStamp, more = {}) => ({ key: 'Escape', repeat: false, defaultPrevented: false, timeStamp, ...more });
 
@@ -30,4 +30,13 @@ test('an Esc held down, or one already handled in the chat, does not stop the tu
   assert.equal(stops(esc(8000, { defaultPrevented: true }), true), false);
   assert.equal(stops(esc(8200), true), false);
   assert.equal(stops(esc(10000), true), true);
+});
+
+/* last: what a viewer took is kept for the whole module, so it comes after the times the tests above use */
+test('an Esc in the chat just after one that closed a picture or file viewer does not stop the turn; one a while later does', () => {
+  const stops = escStopper();
+  /* the viewer took the first, so the chat never heard it */
+  escTaken(esc(20000));
+  assert.equal(stops(esc(20300), true), false);
+  assert.equal(stops(esc(20000 + ESC_AGAIN_MS), true), true);
 });

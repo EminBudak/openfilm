@@ -125,8 +125,6 @@ export const enUS = {
   assets: {
     close: 'Close',
     download: 'Download',
-    imageActualSize: 'Original size',
-    imageFit: 'Fit',
     noPreview: 'This file type cannot be previewed here — download it instead',
     previewFailed: 'This file could not be read',
   },

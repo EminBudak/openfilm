@@ -125,8 +125,6 @@ export const ja: Words = {
   assets: {
     close: '閉じる',
     download: 'ダウンロード',
-    imageActualSize: '原寸',
-    imageFit: '全体を表示',
     noPreview: 'この種類のファイルはここでプレビューできません。ダウンロードしてください',
     previewFailed: 'このファイルを読み込めませんでした',
   },

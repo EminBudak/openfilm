@@ -125,8 +125,6 @@ export const zhCN: Words = {
   assets: {
     close: '关闭',
     download: '下载',
-    imageActualSize: '原始尺寸',
-    imageFit: '适应窗口',
     noPreview: '此类文件无法在这里预览，请下载后查看',
     previewFailed: '无法读取此文件',
   },

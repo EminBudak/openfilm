@@ -121,8 +121,6 @@ export const ko: Words = {
   assets: {
     close: '닫기',
     download: '다운로드',
-    imageActualSize: '원본 크기',
-    imageFit: '화면에 맞춤',
     noPreview: '이 파일 형식은 여기서 미리 볼 수 없습니다. 대신 다운로드하세요',
     previewFailed: '이 파일을 읽을 수 없습니다',
   },
