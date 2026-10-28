@@ -97,7 +97,6 @@ export const es: Words = {
     title: 'Novedades de OpenFilm {version}',
     close: 'Cerrar',
     changelog: 'Versiones en GitHub',
-    earlier: 'Versiones anteriores',
     ok: 'Entendido',
     kind: {
       new: 'Nuevo',

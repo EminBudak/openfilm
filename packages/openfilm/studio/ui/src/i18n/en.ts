@@ -98,7 +98,6 @@ export const en = {
     title: 'What’s new in OpenFilm {version}',
     close: 'Close',
     changelog: 'Releases on GitHub',
-    earlier: 'Earlier versions',
     ok: 'Got it',
     kind: {
       new: 'New',

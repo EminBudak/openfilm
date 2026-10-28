@@ -94,7 +94,6 @@ export const ko: Words = {
     title: 'OpenFilm {version}의 새로운 기능',
     close: '닫기',
     changelog: 'GitHub 릴리스',
-    earlier: '이전 버전',
     ok: '확인',
     kind: {
       new: '새 기능',

@@ -12,7 +12,7 @@ import { LANGUAGES, phrasesUnder, useLanguage, useLanguageChoice, useT, type Lan
 import { studioHost, type HostDeveloper, type HostUpdateState } from '@/lib/host';
 import { showWhatsNew } from '@/lib/whats-new';
 import { usePreviewPrefs, writePreviewPref } from '@/lib/preview-prefs';
-import { hasNotes, newestVersion } from '../WhatsNew';
+import { hasNotes, notesVersion } from '../WhatsNew';
 import { useWebUpdate } from '../UpdateButton';
 import { api, type StudioPrefs, type StudioVersion } from '@/api';
 import { AgentsSection } from './AgentsSection';
@@ -371,7 +371,7 @@ function AboutGroup() {
           <SettingsButton disabled={state === 'checking'} onClick={check}>{t('settings.about.check')}</SettingsButton>
         )}
       >
-        {hasNotes(info?.version) ? <WhatsNewLink version={info!.version} /> : null}
+        {hasNotes(info?.version) ? <WhatsNewLink /> : null}
       </SettingsItem>
       {!inApp && !info?.source && info?.newer ? (
         <SettingsItem
@@ -396,10 +396,10 @@ function AboutGroup() {
 }
 
 /** This release's notes again (components/WhatsNew). */
-function WhatsNewLink({ version }: { version: string }) {
+function WhatsNewLink() {
   const t = useT();
   return (
-    <button type="button" onClick={() => showWhatsNew([version])}
+    <button type="button" onClick={() => showWhatsNew()}
       className="mb-2 text-[13.5px] text-[var(--text-muted)] underline underline-offset-2 transition hover:text-[var(--text)]">
       {t('settings.about.whatsNew')}
     </button>
@@ -468,7 +468,7 @@ function AppAboutGroup() {
         description={description}
         control={control}
       >
-        {hasNotes(s?.version) ? <WhatsNewLink version={s!.version} /> : null}
+        {hasNotes(s?.version) ? <WhatsNewLink /> : null}
         {s?.status === 'downloading' ? (
           <div className="h-1 overflow-hidden rounded-full bg-[var(--fill-tsp)]" role="progressbar" aria-valuenow={Math.round(s.progress)} aria-valuemin={0} aria-valuemax={100}>
             <div className="h-full rounded-full bg-[var(--text)] transition-[width]" style={{ width: `${Math.max(2, s.progress)}%` }} />
@@ -523,15 +523,13 @@ function DeveloperSection() {
           />
         </SettingsGroup>
       ) : null}
-      {newestVersion() ? (
-        <SettingsGroup title={t('settings.developer.releaseGroup')}>
-          <SettingsItem
-            title={t('settings.developer.previewWhatsNew')}
-            description={t('settings.developer.previewWhatsNewHint').replace('{version}', newestVersion()!)}
-            control={<SettingsButton onClick={() => showWhatsNew([newestVersion()!])}>{t('settings.developer.preview')}</SettingsButton>}
-          />
-        </SettingsGroup>
-      ) : null}
+      <SettingsGroup title={t('settings.developer.releaseGroup')}>
+        <SettingsItem
+          title={t('settings.developer.previewWhatsNew')}
+          description={t('settings.developer.previewWhatsNewHint').replace('{version}', notesVersion())}
+          control={<SettingsButton onClick={() => showWhatsNew()}>{t('settings.developer.preview')}</SettingsButton>}
+        />
+      </SettingsGroup>
     </SettingsPage>
   );
 }

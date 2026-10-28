@@ -1,16 +1,16 @@
 /**
  * "What's new" after an update (lib/whats-new.ts): once Studio runs a newer version than the one whose notes were last
- * shown, the notes since then, in the language shown, grouped as new, improved and fixed; under them, scrolling on,
- * every earlier release's, so the whole history reads in the person's language (the changelog on GitHub, a click
- * away, is in English). Closing it marks this version seen. A new install shows nothing (it only remembers the
- * version). Settings › About shows this release's notes again, and Developer previews the newest (WHATS_NEW_EVENT).
+ * shown, this version's notes, in the language shown, grouped as new, improved and fixed. Only this version's, however
+ * many came between: earlier releases are in the changelog on GitHub, a click away. Closing it marks this version
+ * seen. A new install shows nothing (it only remembers the version). Settings › About shows them again, and Developer
+ * previews them before they ship (WHATS_NEW_EVENT).
  */
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowUpRight, Sparkles, Wrench, Zap, X } from 'lucide-react';
 import { api } from '@/api';
 import { useLanguage, useT } from '@/i18n';
-import { RELEASES, WHATS_NEW_EVENT, compareVersions, notesToShow, releaseNotes, type NoteKind, type ReleaseNotes } from '@/lib/whats-new';
+import { RELEASE, WHATS_NEW_EVENT, compareVersions, releaseNotes, type NoteKind, type ReleaseNotes } from '@/lib/whats-new';
 
 const CHANGELOG = 'https://github.com/openfilm/openfilm/releases';
 const KINDS: readonly NoteKind[] = ['new', 'improved', 'fixed'];
@@ -22,11 +22,11 @@ const KIND_ICON: Record<NoteKind, React.ReactNode> = {
 
 export function WhatsNew() {
   const t = useT();
-  const [shown, setShown] = React.useState<ReleaseNotes[] | null>(null);
+  const [shown, setShown] = React.useState<ReleaseNotes | null>(null);
   /** the version to mark seen when closed (after an update), null when opened on asking */
   const [marking, setMarking] = React.useState<string | null>(null);
 
-  /* after an update: the notes since the version last shown; a new install only remembers its version */
+  /* after an update: this version's notes; a new install only remembers its version */
   React.useEffect(() => {
     let live = true;
     void Promise.all([api.version(), api.prefs()]).then(([v, prefs]) => {
@@ -34,19 +34,15 @@ export function WhatsNew() {
       const current = v.version;
       if (!prefs.seenVersion) { void api.setPrefs({ seenVersion: current }).catch(() => {}); return; }
       if (compareVersions(prefs.seenVersion, current) >= 0) return;
-      const list = notesToShow(prefs.seenVersion, current);
-      if (list.length) { setShown(list); setMarking(current); } else void api.setPrefs({ seenVersion: current }).catch(() => {});
+      const notes = releaseNotes(current);
+      if (notes) { setShown(notes); setMarking(current); } else void api.setPrefs({ seenVersion: current }).catch(() => {});
     }).catch(() => {});
     return () => { live = false; };
   }, []);
 
-  /* asked for (Settings › About, Developer): those versions' notes */
+  /* asked for (Settings › About, Developer): this release's notes */
   React.useEffect(() => {
-    const onAsk = (event: Event) => {
-      const versions = (event as CustomEvent<string[]>).detail ?? [];
-      const list = versions.map((v) => releaseNotes(v)).filter((r): r is ReleaseNotes => r !== null);
-      if (list.length) setShown(list);
-    };
+    const onAsk = () => setShown(RELEASE);
     window.addEventListener(WHATS_NEW_EVENT, onAsk);
     return () => window.removeEventListener(WHATS_NEW_EVENT, onAsk);
   }, []);
@@ -66,10 +62,6 @@ export function WhatsNew() {
   }, [shown, close]);
 
   if (!shown || typeof document === 'undefined') return null;
-  const newest = shown[0];
-  /* the releases before those shown, the newest first */
-  const oldest = shown[shown.length - 1];
-  const earlier = RELEASES.filter((r) => compareVersions(r.version, oldest.version) < 0);
 
   return createPortal(
     /* over Settings (z 10050), where About and Developer open it */
@@ -85,7 +77,7 @@ export function WhatsNew() {
           <div className="min-w-0 flex-1">
             <p className="text-[12px] font-medium uppercase tracking-[0.08em] text-[var(--text-faint)]">{t('whatsNew.eyebrow')}</p>
             <h2 id="whats-new-title" className="mt-1 text-[20px] font-semibold text-[var(--text)]">
-              {t('whatsNew.title').replace('{version}', newest.version)}
+              {t('whatsNew.title').replace('{version}', shown.version)}
             </h2>
           </div>
           <button type="button" onClick={close} aria-label={t('whatsNew.close')}
@@ -94,15 +86,7 @@ export function WhatsNew() {
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-2">
-          {shown.map((release) => <Release key={release.version} release={release} heading={shown.length > 1} />)}
-          {earlier.length > 0 && (
-            <>
-              <p className="mt-2 border-t border-[var(--border)] pt-4 text-[11.5px] font-medium uppercase tracking-[0.08em] text-[var(--text-faint)]">
-                {t('whatsNew.earlier')}
-              </p>
-              {earlier.map((release) => <Release key={release.version} release={release} heading />)}
-            </>
-          )}
+          <Release release={shown} />
         </div>
         <div className="flex items-center gap-3 border-t border-[var(--border)] px-6 py-4">
           <a href={CHANGELOG} target="_blank" rel="noreferrer"
@@ -120,8 +104,8 @@ export function WhatsNew() {
   );
 }
 
-/** One release's notes in the language shown, grouped as new, improved and fixed; `heading`: its version beside its date. */
-function Release({ release, heading }: { release: ReleaseNotes; heading: boolean }) {
+/** The release's notes in the language shown, under its date, grouped as new, improved and fixed. */
+function Release({ release }: { release: ReleaseNotes }) {
   const t = useT();
   const language = useLanguage();
   const notes = release.notes[language] ?? release.notes.en;
@@ -129,9 +113,7 @@ function Release({ release, heading }: { release: ReleaseNotes; heading: boolean
   const date = Number.isNaN(d.getTime()) ? release.date : d.toLocaleDateString(language, { year: 'numeric', month: 'long', day: 'numeric' });
   return (
     <section className="py-3">
-      <p className="mb-2.5 text-[12.5px] text-[var(--text-muted)]">
-        {heading ? <span className="font-medium text-[var(--text)]">{`OpenFilm ${release.version} · `}</span> : null}{date}
-      </p>
+      <p className="mb-2.5 text-[12.5px] text-[var(--text-muted)]">{date}</p>
       <div className="flex flex-col gap-3.5">
         {KINDS.map((kind) => {
           const items = notes.filter((n) => n.kind === kind);
@@ -157,5 +139,5 @@ function Release({ release, heading }: { release: ReleaseNotes; heading: boolean
 
 /** Whether this release has notes to show again (Settings › About). */
 export const hasNotes = (version: string | undefined) => Boolean(version && releaseNotes(version));
-/** The newest release's notes, for a preview before it ships (Developer). */
-export const newestVersion = () => RELEASES[0]?.version ?? null;
+/** The version whose notes are written, for a preview before it ships (Developer). */
+export const notesVersion = () => RELEASE.version;

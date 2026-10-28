@@ -98,7 +98,6 @@ export const zhCN: Words = {
     title: 'OpenFilm {version} 有哪些新内容',
     close: '关闭',
     changelog: 'GitHub 上的发布记录',
-    earlier: '更早的版本',
     ok: '知道了',
     kind: {
       new: '新功能',

@@ -97,7 +97,6 @@ export const ja: Words = {
     title: 'OpenFilm {version} の新機能',
     close: '閉じる',
     changelog: 'GitHub のリリース',
-    earlier: '以前のバージョン',
     ok: 'OK',
     kind: {
       new: '新機能',
