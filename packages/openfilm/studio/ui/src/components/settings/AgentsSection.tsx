@@ -282,6 +282,8 @@ export function AgentsSection() {
     const ownKey = agent.id === 'byok' && agent.byok;
     /* found, but it cannot read its own settings, so no session starts: what it says, to fix in its config file */
     const problem = agent.status === 'ready' && agent.problem ? agent.problem : null;
+    /* older than the chat was tried with: it works, but may not list the newest models; how to update it */
+    const outdated = chosen && agent.status === 'ready' && agent.outdated ? agent.outdated : null;
     const said = error?.id === agent.id ? error.text : agent.error ?? (problem ? `${t('settings.agents.unreadable')} ${problem}` : undefined);
     const open = agent.id === 'byok' && keyOpen;
     /* where it is not found: why, on asking (Claude Code waiting for its app's Code tab is not lost) */
@@ -326,10 +328,19 @@ export function AgentsSection() {
           </>
         )}
       >
-        {agent.status === 'waiting' || open || said || asking || switchHow || agent.chosen || meter || notice?.id === agent.id || (chosen && agent.status === 'ready' && (host.mcp || host.skills)) ? (
+        {agent.status === 'waiting' || open || said || asking || switchHow || agent.chosen || meter || outdated || notice?.id === agent.id || (chosen && agent.status === 'ready' && (host.mcp || host.skills)) ? (
           <div className="flex flex-col gap-1.5 pl-[34px]">
             {notice?.id === agent.id ? <p role="status" className="text-[13.5px] leading-relaxed text-[var(--text-muted)]">{notice.text}</p> : null}
             {said ? <p role="alert" className={settingsError}>{said}</p> : null}
+            {outdated ? (
+              <div className="flex flex-col gap-1.5">
+                <p role="status" className="text-[13.5px] leading-relaxed text-[var(--text-muted)]">
+                  {t(outdated.update ? 'settings.agents.outdated' : outdated.app ? 'settings.agents.outdatedApp' : 'settings.agents.outdatedOther')
+                    .replace('{name}', agent.name).replace('{version}', outdated.version).replace('{tested}', outdated.tested)}
+                </p>
+                {outdated.update ? <code className="block break-all rounded-[6px] bg-[var(--fill-tsp)] px-2.5 py-2 font-mono text-[12.5px] text-[var(--text)]">{outdated.update}</code> : null}
+              </div>
+            ) : null}
             {meter ? (
               <div className="flex flex-col gap-1.5" aria-label={t('settings.agents.usage')}>
                 {plan === undefined ? (

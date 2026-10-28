@@ -36,7 +36,7 @@ import { Readable, Writable } from 'node:stream';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as acp from '@agentclientprotocol/sdk';
 import { PATH_SEP, childEnvironment, lastPathSource, loginShellEnvironment, loginShellVariables, shellSubset } from './environment.mjs';
-import { AGENT_PROGRAMS, HOME_BIN_CANDIDATES, chosenProgram, codexAppCopies, codexVersion, desktopApp, detectAgentInstallation, installCommand, laterVersion, notTheAgent, searchReport } from './agent-installation.mjs';
+import { AGENT_PROGRAMS, HOME_BIN_CANDIDATES, chosenProgram, claudeUpdate, claudeVersion, codexAppCopies, codexVersion, desktopApp, detectAgentInstallation, installCommand, laterVersion, notTheAgent, searchReport } from './agent-installation.mjs';
 import { logSwitches } from './agent-logs.mjs';
 import { mergeConfig, sessionSkills } from './agent-skills.mjs';
 import { nodeBinary } from './node-runtime.mjs';
@@ -727,6 +727,8 @@ async function agentOnComputer(id, pathDirs, { fresh = false, checkSignIn = true
     ...(cli && checkSignIn ? ownSignIn(AGENTS[id], await agentStatus(id, cli.path, { fresh })) : { signedIn: null, account: null }),
     /* it signs out with its own command: Switch account signs in to another account from Settings */
     ...(cli && AGENTS[id].logout ? { signOut: true } : {}),
+    /* older than the chat was tried with: Settings › Agents says so, with how to update it */
+    ...(cli && id === 'claude' ? { outdated: claudeOutdated(cli.path) } : {}),
     install,
     setupRequired: claudeApp ? 'code-tab' : null,
     ...(cli ? {} : { app: claudeApp ? null : app, installer: installCommand(id) }),
@@ -864,6 +866,27 @@ const AUTH_REQUIRED = -32000;
 
 /** The oldest Codex the chat was tried with: an older one may have an app server the adapter can't talk to. */
 export const CODEX_TESTED = '0.132.0';
+
+/**
+ * The oldest Claude Code the chat was tried with. An older one lists only the models it knows: 2.1.288 has no Haiku
+ * 5.5, which 2.1.308 has (#230), and the person takes that for OpenFilm's or the service's doing. Never above npm's
+ * `stable`, which the Claude app, the Homebrew cask and `claude update` follow: else most are told to update with
+ * nothing to update to.
+ */
+export const CLAUDE_TESTED = '2.1.308';
+
+/**
+ * A Claude Code older than CLAUDE_TESTED, for Settings › Agents to say so: its version, the one tried, the command that
+ * updates it (null when it has none), and `app` for the Claude app's own copy, which the app updates. Null when it is not
+ * older, or its version can't be told.
+ * @param {string} path @param {{ versionOf?: (file: string) => string | null, updateOf?: (file: string) => { command: string } | { app: true } | null }} [o]
+ */
+export function claudeOutdated(path, { versionOf = claudeVersion, updateOf = claudeUpdate } = {}) {
+  const version = versionOf(path);
+  if (!version || !laterVersion(CLAUDE_TESTED, version)) return null;
+  const how = updateOf(path);
+  return { version, tested: CLAUDE_TESTED, update: how && 'command' in how ? how.command : null, ...(how && 'app' in how ? { app: true } : {}) };
+}
 
 /**
  * A Codex that did not start, older than the ones tried: its reason, and that updating it is the likely fix (an old

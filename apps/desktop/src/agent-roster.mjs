@@ -213,7 +213,7 @@ export async function probeModel({ format, baseUrl, key, model, fetch: fetchImpl
  *
  * @param {{
  *   dataDir: string,
- *   localAgents: (options?: { ids?: string[], statusIds?: string[], fresh?: boolean, onAgent?: (agent: any) => void }) => Promise<Array<{ id: string, cli: { path: string } | null, signedIn: boolean | null, account?: object | null, problem?: string, install: string | null, setupRequired: string | null, app?: string | null, installer?: string | null }>>,
+ *   localAgents: (options?: { ids?: string[], statusIds?: string[], fresh?: boolean, onAgent?: (agent: any) => void }) => Promise<Array<{ id: string, cli: { path: string } | null, signedIn: boolean | null, account?: object | null, problem?: string, outdated?: { version: string, tested: string, update: string | null } | null, install: string | null, setupRequired: string | null, app?: string | null, installer?: string | null }>>,
  *   localAgent?: (id: string, options?: { fresh?: boolean }) => Promise<{ id: string, cli: { path: string } | null, signedIn: boolean | null, account?: object | null, problem?: string, install: string | null, setupRequired: string | null, app?: string | null, installer?: string | null }>,
  *   openSignIn: (id: string) => Promise<{ ok: boolean, error?: string, isOpen?: () => Promise<boolean | null> }>,
  *   signOut?: (id: string) => Promise<{ ok: boolean, error?: string }>,
@@ -275,6 +275,7 @@ export function createRoster(deps) {
       if (choices.disconnected.includes(id) || !choices.shown[id]) return { status: 'off', ...where };
       if (found.signedIn === false) return { status: live.waiting[id] ? 'waiting' : 'sign-in', ...where };
       return { status: 'ready', ...where, ...(found.account ? { account: { ...found.account } } : {}), ...(found.problem ? { problem: found.problem } : {}),
+        ...(found.outdated ? { outdated: { ...found.outdated } } : {}),
         ...(found.signOut && deps.signOut ? { signOut: true } : {}) };
     }
     if (choices.disconnected.includes(id)) return { status: 'off' };

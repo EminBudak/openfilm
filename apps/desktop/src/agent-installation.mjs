@@ -183,6 +183,32 @@ export function claudeVersion(file) {
   return real.split(/[\\/]/).reverse().find((part) => /^\d+\.\d+\.\d+$/.test(part)) ?? null;
 }
 
+/**
+ * How a Claude Code is updated, told from where it is installed, as claudeVersion tells its version: `{ command }`
+ * for a global package (npm's, pnpm's or bun's, each with its own), a Homebrew cask (by its name: claude-code or
+ * claude-code@latest) or the official installer (`claude update`); `{ app: true }` for the Claude app's own copy,
+ * which the app keeps up to date; null when the way can't be told. On Windows the official installer's claude.exe is a
+ * copy, not a link into its versions, so neither its version nor its way is told there.
+ * @returns {{ command: string } | { app: true } | null}
+ */
+export function claudeUpdate(file) {
+  let real;
+  try { real = realpathSync(file); } catch { return null; }
+  const parts = real.split(/[\\/]/);
+  for (let dir = dirname(real), up = 0; up < 3; dir = dirname(dir), up += 1) {
+    try {
+      if (JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).name !== '@anthropic-ai/claude-code') continue;
+      const manager = parts.includes('.bun') ? 'bun add -g' : parts.some((part) => part === 'pnpm' || part === '.pnpm') ? 'pnpm add -g' : 'npm i -g';
+      return { command: `${manager} @anthropic-ai/claude-code@latest` };
+    } catch { /* not here */ }
+  }
+  const cask = parts.indexOf('Caskroom');
+  if (cask >= 0 && parts[cask + 1]) return { command: `brew upgrade --cask ${parts[cask + 1]}` };
+  if (parts.some((part, i) => part === 'claude' && parts[i + 1] === 'versions')) return { command: 'claude update' };
+  if (parts.some((part, i) => part === 'Claude' && parts[i + 1] === 'claude-code')) return { app: true };
+  return null;
+}
+
 /** What programs said of their version (`--version`), by program and its time: each asked once. */
 const versionsAsked = new Map();
 

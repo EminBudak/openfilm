@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { AgentSession, CLIENT_CAPABILITIES, agentDefaults, closeEverySession, planProblem, probeFolder, CODEX_UTF8_CMD, agentShell, allowOption, codexDeveloperInstructions, codexLaunchEnv, distinctOptions, errorCause, legacyOptions, optionsForModel, powerShellScript, powerShellLine, powerShellWindowLaunch, terminalScript, checkAgentProgram, readAgentStatus, setChosenPaths, signInScript, turnError, signInError, codexTooOld, AGENTS, ownSignIn, codexServiceError, codexRefusal, codexNotice, explainFailure, stderrReason, withToolKind, OWN_GROUP, stopTree, winArg } from './agents.mjs';
+import { AgentSession, CLIENT_CAPABILITIES, agentDefaults, closeEverySession, planProblem, probeFolder, CODEX_UTF8_CMD, agentShell, allowOption, codexDeveloperInstructions, codexLaunchEnv, distinctOptions, errorCause, legacyOptions, optionsForModel, powerShellScript, powerShellLine, powerShellWindowLaunch, terminalScript, checkAgentProgram, readAgentStatus, setChosenPaths, signInScript, turnError, signInError, codexTooOld, AGENTS, ownSignIn, codexServiceError, codexRefusal, codexNotice, explainFailure, stderrReason, withToolKind, OWN_GROUP, stopTree, winArg, CLAUDE_TESTED, claudeOutdated } from './agents.mjs';
 import { spawn } from 'node:child_process';
 import { acpSignedIn, signOutAgent } from './agents.mjs';
 
@@ -698,4 +698,14 @@ test("signing out runs the agent's own sign-out with no window, says what it sai
     assert.equal(none.ok, false);
     assert.match(none.error, /Qwen Code has no sign-out command/);
   } finally { setChosenPaths({}); closeEverySession(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a Claude Code older than the one the chat was tried with is said, with how to update it; a later one, or one whose version is not known, is not', () => {
+  const at = (version, update = { command: 'claude update' }) => ({ versionOf: () => version, updateOf: () => update });
+  assert.deepEqual(claudeOutdated('/x/claude', at('2.1.288')), { version: '2.1.288', tested: CLAUDE_TESTED, update: 'claude update' });
+  assert.deepEqual(claudeOutdated('/x/claude', at('2.1.288', { app: true })), { version: '2.1.288', tested: CLAUDE_TESTED, update: null, app: true });
+  assert.deepEqual(claudeOutdated('/x/claude', at('2.1.288', null)), { version: '2.1.288', tested: CLAUDE_TESTED, update: null });
+  assert.equal(claudeOutdated('/x/claude', at(CLAUDE_TESTED)), null);
+  assert.equal(claudeOutdated('/x/claude', at('2.2.0')), null);
+  assert.equal(claudeOutdated('/x/claude', at(null)), null);
 });

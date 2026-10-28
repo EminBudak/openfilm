@@ -259,6 +259,8 @@ export interface HostAgent {
   connectionIssue?: { kind: 'quota' | 'credentials'; message: string };
   /** Found, but it cannot read its own settings (Codex's config file), as it says: no session starts until fixed. */
   problem?: string;
+  /** Older than the chat was tried with (Claude Code): its version, the one tried, the command that updates it, and `app` when its app updates it. */
+  outdated?: { version: string; tested: string; update: string | null; app?: boolean } | null;
   account?: HostAgentAccount;
   /** It signs out with its own command, so the app can switch its account (`agents.switchAccount`); else that is done in the agent itself. */
   signOut?: boolean;

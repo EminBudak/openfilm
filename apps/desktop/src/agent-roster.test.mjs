@@ -542,6 +542,19 @@ test("Codex found but unable to read its own settings says so, with what it said
   assert.equal(codex.problem, problem);
 });
 
+test('a connected Claude Code older than the chat was tried with says so, with its version and how to update it', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'of-roster-'));
+  writeFileSync(join(dir, 'agents.json'), JSON.stringify({ disconnected: [], shown: { claude: true } }));
+  const outdated = { version: '2.1.288', tested: '2.1.308', update: 'npm i -g @anthropic-ai/claude-code@latest' };
+  const r = roster(dir, undefined, {
+    localAgents: async () => [{ id: 'claude', cli: { path: '/bin/claude' }, signedIn: true, account: null, outdated, install: null, setupRequired: null }],
+  });
+  await r.refresh();
+  const claude = r.list().find((a) => a.id === 'claude');
+  assert.equal(claude.status, 'ready', 'an older one still works: only said');
+  assert.deepEqual(claude.outdated, outdated);
+});
+
 test('Codex is connected from the start, Claude Code once the person connects it; a choice kept stays as it is', () => {
   const dir = mkdtempSync(join(tmpdir(), 'of-roster-'));
   assert.deepEqual(readChoices(dir).disconnected, ['claude']);
