@@ -22,6 +22,8 @@
  * only: the film and its exports are as they are.
  */
 
+import { SPEED_MAX, SPEED_MIN } from '../lib/playback-speed.ts';
+
 /** Sounds fetched at once; the others wait, the ones nearest to where the film is first. */
 const FETCHES = 3;
 /** How far ahead of the film sounds are started (film seconds); the rest are started as the film gets near them. */
@@ -322,7 +324,7 @@ export class Player {
   /** Play faster or slower, the pitch kept (see stretchRate); playing goes on from where it is, heard at once. */
   setRate(rate: number) {
     const t = this.time();
-    const next = Math.max(0.25, Math.min(2, rate));
+    const next = Math.max(SPEED_MIN, Math.min(SPEED_MAX, rate));
     if (next === this.rate) return;
     this.rate = next;
     if (this.playing) this.restart(t);

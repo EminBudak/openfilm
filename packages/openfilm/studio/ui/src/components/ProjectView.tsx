@@ -17,6 +17,7 @@ import { Preview, type FilmInfo, type PlayedReport, type PreviewHandle } from '@
 import { usePreviewRenders } from '@/editor/use-preview-renders';
 import { filmShape, type MediaFacts } from '@/lib/film-shape';
 import { changesPicture } from '@/lib/picture-files';
+import { SPEED_MAX } from '@/lib/playback-speed';
 import type { ReplaceFamily } from '@/lib/clip-replace';
 import { layoutTracks, type TimelineBlock, type TimelineTrack } from '@/lib/timeline-layout';
 import { filmClipKind, filmSrcIsPage, filmSrcKind, filmTrackBadges, parseFilmDocLoc, type FilmBox, type FilmDoc, type FilmOverride } from '@/lib/film';
@@ -461,8 +462,8 @@ export function ProjectView({ projectId, onProject, onLeave }: {
     if (!player.current.playing) preview.current?.seek(pictureAt(t));
     for (const fn of listeners.current) fn();
   }, []);
-  /* ── J / K / L: the shuttle. 1× and 2× forward are the player's own (with sound); faster, or backwards, the picture
-     alone is sought along at that rate, silent, as a scrub is (the player plays forward only, at most 2×) ── */
+  /* ── J / K / L: the shuttle. 1×, 2× and 4× forward are the player's own (with sound); backwards, the picture alone
+     is sought along at that rate, silent, as a scrub is (the player plays forward only, at most 4×) ── */
   const shuttleRateRef = React.useRef(0);
   const shuttleFrame = React.useRef(0);
   /** The shuttle let go: the player back at the speed picked if the shuttle changed its rate. */
@@ -507,7 +508,7 @@ export function ProjectView({ projectId, onProject, onLeave }: {
     const rate = shuttleRate(was, key);
     if (rate === 0) { stopShuttle(); pause(); return; }
     if (!(player.current.duration > 0)) return;
-    if (rate > 0 && rate <= 2) {
+    if (rate > 0 && rate <= SPEED_MAX) {
       if (shuttleFrame.current) { cancelAnimationFrame(shuttleFrame.current); shuttleFrame.current = 0; }
       shuttleRateRef.current = rate;
       player.current.setRate(rate);
