@@ -21,8 +21,8 @@ const MAX_SECONDS = 10 * 60;
 /** Bigger than this is not copied at its size (H.264 stops at 4096 on a side in most decoders): left as it is when it
     plays, else copied scaled down to fit. */
 const MAX_SIDE = 4096;
-/** Changing how copies are made makes new ones. */
-const VERSION = 2;
+/** Changing how copies are made makes new ones (3: a VP9's or an HEVC's alpha was not seen, and its copy was without it). */
+const VERSION = 3;
 /** A copy on the graphics chip that writes nothing for this long has hung (VideoToolbox does on some virtual Macs):
     stopped, and made on the processor. */
 const STALL_MS = 15_000;
@@ -32,6 +32,22 @@ const probe = (file, args) => new Promise((done, fail) => {
   execFile('ffprobe', ['-v', 'error', ...args, file], { maxBuffer: 16 << 20, windowsHide: true }, (error, stdout) => (error ? fail(error) : done(String(stdout))));
 });
 
+/** What ffprobe is asked of a video stream to tell whether it has an alpha (hasAlpha). */
+const ALPHA_ENTRIES = 'pix_fmt,view_ids_available:stream_tags=alpha_mode';
+
+/**
+ * Whether a video stream (as ffprobe tells it, ALPHA_ENTRIES) has an alpha: in its pixel format (ProRes 4444, PNG,
+ * QuickTime Animation…), beside its picture as a VP9's is (its `alpha_mode` tag), or as a second layer, as Apple's HEVC
+ * with alpha has it, its pixel format plain yuv420p (ffprobe 7.1 and later list the layers; a spatial video's second
+ * view counts too, and is left alone the same way). An older ffprobe ignores the entry it does not know.
+ * @param {{ pix_fmt?: string, view_ids_available?: string, tags?: { alpha_mode?: string } }} stream
+ */
+export function hasAlpha(stream) {
+  return /^(yuva|rgba|bgra|argb|abgr|gbrap|ya)/.test(String(stream.pix_fmt))
+    || stream.tags?.alpha_mode === '1'
+    || String(stream.view_ids_available ?? '').includes(',');
+}
+
 /**
  * What a copy of `file` would be made from: its first video stream, when it is one worth copying (8-bit 4:2:0, no
  * alpha, not too big or long, key frames far apart). Null when it is better left alone.
@@ -40,11 +56,11 @@ const probe = (file, args) => new Promise((done, fail) => {
 export async function slowSeeking(file) {
   let info;
   try {
-    info = JSON.parse(await probe(file, ['-select_streams', 'v:0', '-show_entries', 'stream=width,height,pix_fmt,avg_frame_rate:format=duration', '-of', 'json']));
+    info = JSON.parse(await probe(file, ['-select_streams', 'v:0', '-show_entries', `stream=width,height,avg_frame_rate,${ALPHA_ENTRIES}:format=duration`, '-of', 'json']));
   } catch { return null; }
   const stream = info.streams?.[0];
   const seconds = Number(info.format?.duration);
-  if (!stream || !['yuv420p', 'yuvj420p'].includes(stream.pix_fmt)) return null;
+  if (!stream || !['yuv420p', 'yuvj420p'].includes(String(stream.pix_fmt)) || hasAlpha(stream)) return null;
   if (!(seconds > 0) || seconds > MAX_SECONDS || stream.width > MAX_SIDE || stream.height > MAX_SIDE) return null;
   const [n, d] = String(stream.avg_frame_rate).split('/').map(Number);
   const fps = n > 0 && d > 0 ? n / d : 30;
@@ -82,14 +98,14 @@ const decodedAnywhere = (/** @type {{ codec_name?: string, pix_fmt?: string }} *
 export async function copyNeed(file, { plays, slow = true } = {}) {
   let info;
   try {
-    info = JSON.parse(await probe(file, ['-select_streams', 'v:0', '-show_entries', 'stream=codec_name,width,height,pix_fmt,avg_frame_rate:stream_tags=alpha_mode', '-of', 'json']));
+    info = JSON.parse(await probe(file, ['-select_streams', 'v:0', '-show_entries', `stream=codec_name,width,height,avg_frame_rate,${ALPHA_ENTRIES}`, '-of', 'json']));
   } catch { return null; }
   const stream = info.streams?.[0];
   if (!stream) return null;
   const w = Number(stream.width), h = Number(stream.height);
   if (plays && !decodedAnywhere(stream) && !(await plays(file))) {
     const [n, d] = String(stream.avg_frame_rate).split('/').map(Number);
-    const alpha = /^(yuva|rgba|bgra|argb|abgr|gbrap|ya)/.test(String(stream.pix_fmt)) || stream.tags?.alpha_mode === '1';
+    const alpha = hasAlpha(stream);
     const need = { why: /** @type {const} */ ('unplayable'), fps: n > 0 && d > 0 ? n / d : 30, w, h, alpha };
     /* too big to copy at its size: scaled down to fit, its sides even. The film draws a video scaled to its clip's box,
        which the original's size sets, so it is placed the same; left out, it would draw nothing at all */
@@ -294,7 +310,10 @@ async function makeCopy(file, out, need, signal) {
      the render that asked for the copy */
   const drop = () => { try { rmSync(part, { force: true }); } catch { /* left */ } };
   try {
-    await onTheChip(need.alpha ? null : await hardwareEncoder('h264', await encoders()), make, signal);
+    /* one with an alpha all on the processor: the chip's decoding (VideoToolbox) drops an HEVC's alpha layer, and says
+       nothing */
+    if (need.alpha) await make(null, []);
+    else await onTheChip(await hardwareEncoder('h264', await encoders()), make, signal);
   } catch {
     drop();
     return signal?.aborted ? 'cancelled' : 'failed';

@@ -7,7 +7,7 @@ import { join, relative, sep } from 'node:path';
 import { filmHtml } from './film-doc.mjs';
 import { launch, serve } from './host.mjs';
 import { render } from './render.mjs';
-import { copyNeed, firstFrame, madeCopy, seekableCopies, slowSeeking } from './seekable.mjs';
+import { copyNeed, firstFrame, hasAlpha, madeCopy, seekableCopies, slowSeeking } from './seekable.mjs';
 import { look } from './look.mjs';
 
 const hasFfmpeg = (() => { try { execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); return true; } catch { return false; } })();
@@ -36,6 +36,35 @@ test('a video with key frames far apart gets a copy with the same frames at the 
     /* kept: the next render finds it */
     const again = await seekableCopies([join(dir, 'slow.mp4')], dir);
     assert.equal(again.get(join(dir, 'slow.mp4')), copy);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('an alpha is seen in a pixel format, beside a VP9\'s picture, and as an HEVC\'s second layer', () => {
+  /* as ffprobe 8.1 tells them */
+  assert.equal(hasAlpha({ pix_fmt: 'yuva444p12le' }), true, 'ProRes 4444');
+  assert.equal(hasAlpha({ pix_fmt: 'argb' }), true, 'QuickTime Animation');
+  assert.equal(hasAlpha({ pix_fmt: 'yuv420p', tags: { alpha_mode: '1' } }), true, 'VP9 with its alpha');
+  assert.equal(hasAlpha({ pix_fmt: 'yuv420p', view_ids_available: '0,0', tags: {} }), true, "Apple's HEVC with alpha");
+  assert.equal(hasAlpha({ pix_fmt: 'yuv420p', view_ids_available: '', tags: {} }), false, 'HEVC without');
+  assert.equal(hasAlpha({ pix_fmt: 'yuv420p' }), false, 'an older ffprobe, H.264');
+});
+
+test('a VP9 with an alpha and key frames far apart keeps its alpha: it gets no copy, which would be H.264, without it', ffmpeg, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'of-seekable-alpha-'));
+  try {
+    /* 4 s, one key frame: as an animation exported with its alpha (WebM, libvpx-vp9) usually is */
+    const webm = (name, format) => execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', `color=c=red@0.5:size=320x180:rate=30,format=${format}`, '-t', '4',
+      '-c:v', 'libvpx-vp9', '-pix_fmt', format === 'rgba' ? 'yuva420p' : 'yuv420p', '-g', '120', '-deadline', 'realtime', '-cpu-used', '8', join(dir, name)]);
+    webm('alpha.webm', 'rgba');
+    webm('opaque.webm', 'yuv420p');
+    assert.equal(await slowSeeking(join(dir, 'alpha.webm')), null);
+    assert.ok(await slowSeeking(join(dir, 'opaque.webm')), 'the same without an alpha seeks slowly');
+    assert.equal(await copyNeed(join(dir, 'alpha.webm'), { plays: async () => true }), null);
+    const copies = await seekableCopies([join(dir, 'alpha.webm'), join(dir, 'opaque.webm')], dir, { plays: async () => true });
+    assert.deepEqual([...copies.keys()], [join(dir, 'opaque.webm')]);
+    assert.equal(madeCopy(join(dir, 'alpha.webm'), dir), null, 'a page asking for it is served it as it is');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
