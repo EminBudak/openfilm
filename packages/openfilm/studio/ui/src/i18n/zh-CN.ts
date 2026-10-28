@@ -1860,7 +1860,7 @@ export const zhCN: Words = {
       ownErrors: {
         noFormat: '请选择 API 格式。',
         address: '地址要以 https:// 开头（本机上的服务可以用 http://）。',
-        noModel: '请填写模型。',
+        noModel: '请填写模型名称。',
         modelGone: '这个模型已经不在设置里了。',
         noKey: '请粘贴密钥。',
         unreachable: '连不上这个服务：{reason}',

@@ -1862,7 +1862,7 @@ export const ko: Words = {
         keyRefused: '서비스가 이 키를 받아들이지 않았습니다.',
         webPage: '{url}이(가) API가 아닌 웹 페이지로 응답합니다({status}). 주소와 API 형식을 확인하세요.',
         noImages: '이 모델은 이미지를 읽을 수 없습니다. 에이전트가 직접 만든 프레임을 확인해야 하므로 이미지를 읽을 수 있는 모델을 선택하세요.',
-        nothingThere: '{url}에서 응답하는 것이 없습니다. 주소와 API 형식을 확인하세요.',
+        nothingThere: '{url}에서 응답이 없습니다. 주소와 API 형식을 확인하세요.',
         answered: '서비스가 {status}(으)로 응답했습니다.',
       },
       cancel: '취소',
