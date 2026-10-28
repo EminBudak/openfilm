@@ -130,8 +130,8 @@ export function joinColor(hex: string, alpha: number): string {
 
 /**
  * The style is kept per project (in the project folder, see useSubtitleStyle); this browser also remembers the look
- * last used, the starting point for a project whose style was never changed: someone who set up large yellow
- * subtitles wants them in the next film too.
+ * last used, the look a new project starts in (written to it as it is made, see api.newProject): someone who set up
+ * large yellow subtitles wants them in the next film too.
  */
 const STORE_KEY = 'openfilm.subtitles';
 
