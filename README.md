@@ -1,4 +1,4 @@
-> This fork of [OpenFilm](https://github.com/openfilm/openfilm) adds a Wiro provider for pictures, video, music, sound effects, voice-over, transcripts and subtitle translation, on the [studio/wiro-provider](https://github.com/EminBudak/openfilm/tree/studio/wiro-provider) branch. The story behind it: [OpenFilm Wiro Provider: What a Closed Pull Request Taught Me](https://eminbudak.com/blog/openfilm-wiro-provider-policy/).
+> This fork of [OpenFilm](https://github.com/openfilm/openfilm) adds a Wiro provider for pictures, video, music, sound effects, voice-over, transcripts and subtitle translation, on the [studio/wiro-provider](https://github.com/EminBudak/openfilm/tree/studio/wiro-provider) branch. Read the story behind it on my blog: [OpenFilm Wiro Provider: The Policy Lesson](https://eminbudak.com/blog/openfilm-wiro-provider-policy/).
 
 <p align="center">
   <br>
