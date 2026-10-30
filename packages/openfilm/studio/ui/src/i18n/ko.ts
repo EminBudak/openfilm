@@ -1996,6 +1996,8 @@ export const ko: Words = {
       key: '키',
       region: '지역(eastus 등)',
       azureNote: "내레이션. Azure의 각 서비스는 자체 키와 리소스가 있는 지역을 씁니다. 둘 다 리소스의 '키 및 엔드포인트' 페이지에 있습니다.",
+      secret: 'API 시크릿(선택)',
+      wiroNote: '서명 인증을 쓰는 프로젝트에는 API 시크릿도 필요합니다. API 키만 쓰는 프로젝트라면 비워 두세요. 둘 다 wiro.ai의 Projects 페이지에 있습니다.',
       pasteKey: '{name} API 키 붙여넣기',
       save: '저장',
       cancel: '취소',

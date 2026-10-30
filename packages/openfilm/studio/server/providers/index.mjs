@@ -27,6 +27,7 @@ import groq from './groq.mjs';
 import azure from './azure.mjs';
 import doubao from './doubao.mjs';
 import mimo from './mimo.mjs';
+import wiro from './wiro.mjs';
 
 /**
  * @typedef {import('./contract.mjs').Provider} Provider @typedef {import('./contract.mjs').Verb} Verb
@@ -35,7 +36,7 @@ import mimo from './mimo.mjs';
  */
 
 /** The providers paid with the person's own key. */
-const OWN = [elevenlabs, openai, google, fal, pexels, pixabay, brave, tavily, groq, azure, doubao, mimo];
+const OWN = [elevenlabs, openai, google, fal, pexels, pixabay, brave, tavily, groq, azure, doubao, mimo, wiro];
 
 /** The kinds of media the person chooses a provider and model for (Settings → Services). */
 const USE_VERBS = /** @type {Verb[]} */ (['tts', 'music', 'sfx', 'asr', 'image', 'image-search', 'video', 'translate', 'web-search']);

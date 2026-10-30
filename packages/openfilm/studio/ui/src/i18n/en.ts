@@ -2001,6 +2001,8 @@ export const en = {
       key: 'Key',
       region: 'Region (eastus, …)',
       azureNote: "Voice-over. Each Azure service has its own key, and the region of the resource it is in: both are on the resource's Keys and Endpoint page.",
+      secret: 'API secret (optional)',
+      wiroNote: 'A project with signature-based authentication needs its API secret too; for one with API key only, leave it empty. Both are on the Projects page on wiro.ai.',
       pasteKey: 'Paste your {name} API key',
       save: 'Save',
       cancel: 'Cancel',

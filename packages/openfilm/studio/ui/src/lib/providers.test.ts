@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { azureKey, couldMake, offered, providerGroups, type OwnProvider, type ProviderVerb, type ProvidersState } from './providers.ts';
+import { azureKey, couldMake, offered, providerGroups, wiroKey, type OwnProvider, type ProviderVerb, type ProvidersState } from './providers.ts';
 
 const own = (id: string, name: string, verbs: ProviderVerb[], source: OwnProvider['source'] = null): OwnProvider =>
   ({ id, name, verbs, models: {}, keysUrl: '', env: '', source, last4: null });
@@ -37,4 +37,10 @@ test("an Azure service's region and key go to the server as <region>:<key>, once
   assert.equal(azureKey('', 'a1b2c3d4e5'), null);
   assert.equal(azureKey('east us', 'a1b2c3d4e5'), null);
   assert.equal(azureKey('eastus', '  '), null);
+});
+
+test("Wiro's key goes to the server alone, or as <key>:<secret> for a project with signature-based authentication", () => {
+  assert.equal(wiroKey(' k1b2c3d4e5 ', ''), 'k1b2c3d4e5');
+  assert.equal(wiroKey('k1b2c3d4e5', ' s3cr3t9 '), 'k1b2c3d4e5:s3cr3t9');
+  assert.equal(wiroKey('  ', 's3cr3t9'), null);
 });

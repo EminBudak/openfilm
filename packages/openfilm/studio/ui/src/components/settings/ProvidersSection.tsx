@@ -11,7 +11,7 @@
 import React from 'react';
 import { ChevronRight, ExternalLink, Plus } from 'lucide-react';
 import { useT } from '@/i18n';
-import { AZURE_SERVICES, azureKey, providerGroups, useProviders, type OwnProvider, type ProviderVerb, type ProvidersHook } from '@/lib/providers';
+import { AZURE_SERVICES, azureKey, providerGroups, useProviders, wiroKey, type OwnProvider, type ProviderVerb, type ProvidersHook } from '@/lib/providers';
 import { customProblem } from './CustomServices';
 import { ProviderMark } from './ProviderMark';
 import { SettingsButton, SettingsField, SettingsGroup, SettingsInset, SettingsItem, SettingsPage, SettingsStatus, settingsError, settingsLink } from './ui';
@@ -86,13 +86,16 @@ function KeyRow({ provider, hook }: { provider: OwnProvider; hook: ProvidersHook
   const t = useT();
   const [adding, setAdding] = React.useState(false);
   const [draft, setDraft] = React.useState('');
-  /* Microsoft Azure: each service its own region and key (AZURE_SERVICES), kept as `<region>:<key>` */
+  /* Microsoft Azure: each service its own region and key (AZURE_SERVICES), kept as `<region>:<key>`. Wiro: a project
+     with signature-based authentication has an API secret beside its key, kept as `<key>:<secret>` */
   const azure = provider.id === 'azure';
+  const wiro = provider.id === 'wiro';
   const [region, setRegion] = React.useState('');
+  const [secret, setSecret] = React.useState('');
   const saving = hook.busy === provider.id;
-  const key = azure ? azureKey(region, draft) : draft.trim() ? draft : null;
+  const key = azure ? azureKey(region, draft) : wiro ? wiroKey(draft, secret) : draft.trim() ? draft : null;
 
-  const close = () => { setAdding(false); setDraft(''); setRegion(''); };
+  const close = () => { setAdding(false); setDraft(''); setRegion(''); setSecret(''); };
   const save = async () => {
     if (!key || saving) return;
     if (await hook.saveKey(provider.id, key)) close();
@@ -125,6 +128,8 @@ function KeyRow({ provider, hook }: { provider: OwnProvider; hook: ProvidersHook
                 <span className="text-[14px] font-medium text-[var(--text)]">{AZURE_SERVICES[0]!.name}</span>
                 <span className="text-[13px] text-[var(--text-faint)]">{t('settings.providers.azureNote')}</span>
               </div>
+            ) : wiro ? (
+              <span className="text-[13px] text-[var(--text-faint)]">{t('settings.providers.wiroNote')}</span>
             ) : null}
             <div className="flex items-center gap-2">
               {azure ? (
@@ -154,6 +159,19 @@ function KeyRow({ provider, hook }: { provider: OwnProvider; hook: ProvidersHook
                 aria-label={pasteLabel}
                 className="flex-1 font-mono placeholder:font-sans"
               />
+              {wiro ? (
+                <SettingsField
+                  type="password"
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={secret}
+                  onChange={(e) => setSecret(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } }}
+                  placeholder={t('settings.providers.secret')}
+                  aria-label={t('settings.providers.secret')}
+                  className="flex-1 font-mono placeholder:font-sans"
+                />
+              ) : null}
               <SettingsButton variant="quiet" onClick={close}>{t('settings.providers.cancel')}</SettingsButton>
               <SettingsButton type="submit" variant="primary" disabled={!key || saving}>{t('settings.providers.save')}</SettingsButton>
             </div>

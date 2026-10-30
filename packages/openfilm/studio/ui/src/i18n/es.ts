@@ -2000,6 +2000,8 @@ export const es: Words = {
       key: 'Clave',
       region: 'Región (eastus, …)',
       azureNote: "Locución. Cada servicio de Azure tiene su propia clave y la región de su recurso: las dos están en la página Claves y punto de conexión del recurso.",
+      secret: 'Secreto de API (opcional)',
+      wiroNote: 'Un proyecto con autenticación por firma necesita también su secreto de API; si solo usa la clave de API, déjalo vacío. Los dos están en la página Projects de wiro.ai.',
       pasteKey: 'Pega tu clave de API de {name}',
       save: 'Guardar',
       cancel: 'Cancelar',

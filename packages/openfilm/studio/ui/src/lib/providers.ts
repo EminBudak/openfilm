@@ -82,6 +82,15 @@ export function azureKey(region: string, key: string): string | null {
   return /^[a-z0-9]+$/.test(place) && key.trim() ? `${place}:${key.trim()}` : null;
 }
 
+/**
+ * Wiro's key as the server takes it: the project's API key, and for a project with signature-based authentication its
+ * API secret beside it, as `<key>:<secret>`; null while there is no key.
+ */
+export function wiroKey(key: string, secret: string): string | null {
+  const k = key.trim(), s = secret.trim();
+  return k ? (s ? `${k}:${s}` : k) : null;
+}
+
 /** Whether any provider here, connected or not, can make `verb`. */
 export const offered = (state: ProvidersState, verb: ProviderVerb) => state.providers.some((p) => p.verbs.includes(verb));
 

@@ -2000,6 +2000,8 @@ export const ja: Words = {
       key: 'キー',
       region: 'リージョン（eastus など）',
       azureNote: "ナレーション。Azure のサービスはそれぞれ独自のキーと、リソースのリージョンを使います。どちらもリソースの「キーとエンドポイント」ページにあります。",
+      secret: 'API シークレット（任意）',
+      wiroNote: '署名認証のプロジェクトには API シークレットも必要です。API キーだけのプロジェクトでは空欄のままにします。どちらも wiro.ai の Projects ページにあります。',
       pasteKey: '{name} の API キーを貼り付け',
       save: '保存',
       cancel: 'キャンセル',

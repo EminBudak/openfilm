@@ -2001,6 +2001,8 @@ export const zhCN: Words = {
       key: '密钥',
       region: '区域（如 eastus）',
       azureNote: "配音。Azure 的每项服务各有自己的密钥和资源所在区域，两者都在资源的“密钥和终结点”页面里。",
+      secret: 'API Secret（可选）',
+      wiroNote: '使用签名认证的项目还需要填写 API Secret；只用 API Key 的项目留空即可。两者都在 wiro.ai 的 Projects 页面上。',
       pasteKey: '粘贴你的 {name} API 密钥',
       save: '保存',
       cancel: '取消',
